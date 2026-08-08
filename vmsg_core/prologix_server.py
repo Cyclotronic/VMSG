@@ -246,7 +246,7 @@ class PrologixSocketServer:
         except Exception as e:
             logger.error("SOCKET_SERVER", f"Error executing command '{line}' from {client_addr}: {e}", exc_info=True)
             auto_mode = 1 if int(self.get_client_setting(client_addr, "auto", 0)) == 1 else 0
-            if line.strip().lower() == "++read" or auto_mode == 1:
+            if line.strip().lower().startswith("++read") or auto_mode == 1:
                 return self._empty_response(client_addr)
             return None
 

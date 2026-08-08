@@ -11,5 +11,6 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Run the test client
+# Run the test suites
 python3 test_emulator.py
+python3 test_round5_verification.py

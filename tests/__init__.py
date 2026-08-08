@@ -1,0 +1,1 @@
+# VMSG Integration Test Package

@@ -149,13 +149,51 @@ class VisaManager:
         if not visa_address:
             raise ValueError("Empty VISA address")
 
-        if not visa_address.upper().startswith("MOCK::"):
-            with self.unresponsive_lock:
-                now = time.time()
-                if visa_address in self.unresponsive_cache:
-                    last_fail = self.unresponsive_cache[visa_address]
-                    if now - last_fail < 120.0:
-                        raise RuntimeError(f"Resource {visa_address} is recently unresponsive (cooldown active).")
+    def _record_unresponsive_failure(self, visa_address: str) -> None:
+        if visa_address.upper().startswith("MOCK::"):
+            return
+        with self.unresponsive_lock:
+            entry = self.unresponsive_cache.get(visa_address)
+            now = time.time()
+            if isinstance(entry, dict):
+                count = entry.get("count", 0) + 1
+            elif isinstance(entry, (int, float)):
+                count = 2
+            else:
+                count = 1
+            self.unresponsive_cache[visa_address] = {"time": now, "count": count}
+
+    def _is_unresponsive(self, visa_address: str) -> bool:
+        if visa_address.upper().startswith("MOCK::"):
+            return False
+        with self.unresponsive_lock:
+            entry = self.unresponsive_cache.get(visa_address)
+            if not entry:
+                return False
+            now = time.time()
+            if isinstance(entry, dict):
+                last_time = entry.get("time", 0)
+                count = entry.get("count", 1)
+            else:
+                last_time = float(entry)
+                count = 2
+            
+            # 1st failure: short 5.0s cooldown (allows quick retry for slow instruments)
+            # 2nd+ failure: 120.0s cooldown (fast-fails permanently dead devices)
+            cooldown_period = 5.0 if count == 1 else 120.0
+            return (now - last_time) < cooldown_period
+
+    def get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
+        """
+        Retrieves a thread-safe connection to the requested VISA address.
+        If address starts with 'MOCK::', returns a simulated resource.
+        NOTE: Must be called from a worker thread or via async_get_resource on event loop.
+        """
+        if not visa_address:
+            raise ValueError("Empty VISA address")
+
+        if self._is_unresponsive(visa_address):
+            raise RuntimeError(f"Resource {visa_address} is recently unresponsive (cooldown active).")
 
         while True:
             with self.lock:
@@ -221,8 +259,7 @@ class VisaManager:
             with self.lock:
                 self.pending_opens.pop(visa_address, None)
                 open_event.set()
-                with self.unresponsive_lock:
-                    self.unresponsive_cache[visa_address] = time.time()
+            self._record_unresponsive_failure(visa_address)
             logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
             raise
 
@@ -235,9 +272,7 @@ class VisaManager:
                 timeout=connect_budget_s
             )
         except asyncio.TimeoutError:
-            if not visa_address.upper().startswith("MOCK::"):
-                with self.unresponsive_lock:
-                    self.unresponsive_cache[visa_address] = time.time()
+            self._record_unresponsive_failure(visa_address)
             raise
 
     def purge_resource(self, visa_address: str) -> None:
@@ -281,19 +316,13 @@ class VisaManager:
         is_mock = visa_address.upper().startswith("MOCK::")
         
         if not is_mock and not force:
-            with self.unresponsive_lock:
-                now = time.time()
-                if visa_address in self.unresponsive_cache:
-                    last_fail = self.unresponsive_cache[visa_address]
-                    if now - last_fail < 120.0:
-                        return None
+            if self._is_unresponsive(visa_address):
+                return None
 
         try:
             res, res_lock = self.get_resource(visa_address, timeout_ms=timeout_ms)
         except Exception:
-            if not is_mock:
-                with self.unresponsive_lock:
-                    self.unresponsive_cache[visa_address] = time.time()
+            self._record_unresponsive_failure(visa_address)
             return None
 
         with res_lock:
@@ -312,15 +341,12 @@ class VisaManager:
                 except Exception:
                     pass
                 
-                if not is_mock:
-                    with self.unresponsive_lock:
-                        self.unresponsive_cache.pop(visa_address, None)
+                with self.unresponsive_lock:
+                    self.unresponsive_cache.pop(visa_address, None)
                         
                 return idn
             except Exception:
-                if not is_mock:
-                    with self.unresponsive_lock:
-                        self.unresponsive_cache[visa_address] = time.time()
+                self._record_unresponsive_failure(visa_address)
                 return None
 
     def scan_all_hardware(self, scan_serial: bool = False) -> List[Dict[str, str]]:
