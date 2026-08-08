@@ -330,3 +330,14 @@ VMSG could advertise itself over mDNS (`_prologix._tcp` or a custom service type
 15. `pyproject.toml`, pinned constraints, pytest unit tests, macOS CI (§7).
 
 Items 1–5 are roughly an evening. Item 6 is the one meaningful refactor, and it's the one that determines whether VMSG can carry real measurement traffic or stays a `*IDN?`-and-ASCII-readings tool.
+
+---
+
+## 10. Note on Returning `None` in Socket Responses
+
+Returning `None` from command routing/reads when a slot is unmapped or connection fails results in the socket server sending zero bytes back to the client. This causes standard blocking TCP clients (including `test_emulator.py`) to block on `s.recv()` and hang indefinitely.
+
+To prevent client-side hangs:
+* **Unmapped Slots**: Reads must return `\r\n` (after blocking for `read_tmo_ms` if simulating a timeout) or return an error message (if `unmapped_behavior == "message"`).
+* **Connection Failures**: An error response should be written back to the socket client to notify it of the failure rather than silently ignoring the request.
+

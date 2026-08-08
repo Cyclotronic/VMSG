@@ -5,6 +5,7 @@ import re
 from typing import Dict, Any, List, Optional, Tuple
 import pyvisa
 from pyvisa.errors import VisaIOError
+from .logger import logger
 
 class MockVisaResource:
     """Simulates a physical instrument's response behavior for testing and out-of-the-box operation."""
@@ -106,17 +107,16 @@ class VisaManager:
     def _init_resource_manager(self) -> None:
         """Initializes PyVISA ResourceManager with fallback to Pure-Python backend (@py)."""
         try:
-            # First try the default system VISA (e.g., NI-VISA)
             self.rm = pyvisa.ResourceManager()
-            print("[VisaManager] Successfully initialized default PyVISA ResourceManager.")
+            logger.info("VISAMANAGER", "Successfully initialized default PyVISA ResourceManager.")
         except Exception as e_ni:
-            print(f"[VisaManager] Default NI-VISA init failed: {e_ni}. Trying pure-python @py backend...")
+            logger.info("VISAMANAGER", f"Default NI-VISA init failed: {e_ni}. Trying pure-python @py backend...")
             try:
                 self.rm = pyvisa.ResourceManager("@py")
-                print("[VisaManager] Successfully initialized pure-python (@py) PyVISA ResourceManager.")
+                logger.info("VISAMANAGER", "Successfully initialized pure-python (@py) PyVISA ResourceManager.")
             except Exception as e_py:
                 self.rm = None
-                print(f"[VisaManager] Error: Could not initialize any VISA ResourceManager: {e_py}")
+                logger.error("VISAMANAGER", f"Could not initialize any VISA ResourceManager: {e_py}")
 
     def get_interface_lock(self, visa_address: str) -> threading.Lock:
         """Retrieves or creates a lock specific to the hardware interface (e.g., GPIB0, USB0, TCPIP0)."""
@@ -135,7 +135,7 @@ class VisaManager:
         try:
             return list(self.rm.list_resources())
         except Exception as e:
-            print(f"[VisaManager] Error listing physical resources: {e}")
+            logger.error("VISAMANAGER", f"Error listing physical resources: {e}")
             return []
 
     def get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
@@ -147,12 +147,10 @@ class VisaManager:
             raise ValueError("Empty VISA address")
 
         with self.lock:
-            # Create a separate lock for this resource address if it doesn't exist
             if visa_address not in self.resource_locks:
                 self.resource_locks[visa_address] = threading.Lock()
             res_lock = self.resource_locks[visa_address]
 
-            # Check cache
             if visa_address in self.resource_cache:
                 resource = self.resource_cache[visa_address]
                 try:
@@ -162,38 +160,34 @@ class VisaManager:
                     pass
                 return resource, res_lock
 
-            # If Mock
             if visa_address.upper().startswith("MOCK::"):
                 resource = MockVisaResource(visa_address)
                 resource.timeout = timeout_ms
                 self.resource_cache[visa_address] = resource
-                print(f"[VisaManager] Created cached Mock resource: {visa_address}")
+                logger.info("VISAMANAGER", f"Created cached Mock resource: {visa_address}")
                 return resource, res_lock
 
-            # Real VISA connection
             if not self.rm:
                 raise RuntimeError("No VISA ResourceManager available to connect to physical hardware.")
 
             try:
                 resource = self.rm.open_resource(visa_address)
                 resource.timeout = timeout_ms
-                # Clear write_termination so we can send our exact Prologix EOS terminators manually
                 if hasattr(resource, "write_termination"):
                     try:
                         resource.write_termination = ""
                     except Exception:
                         pass
-                # Set read_termination for USB TMC devices so reads complete on newline without timing out
                 if visa_address.upper().startswith("USB") and hasattr(resource, "read_termination"):
                     try:
                         resource.read_termination = "\n"
                     except Exception:
                         pass
                 self.resource_cache[visa_address] = resource
-                print(f"[VisaManager] Connected and cached physical resource: {visa_address}")
+                logger.info("VISAMANAGER", f"Connected and cached physical resource: {visa_address}")
                 return resource, res_lock
             except Exception as e:
-                print(f"[VisaManager] Error opening VISA resource {visa_address}: {e}")
+                logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
                 raise
 
     def purge_resource(self, visa_address: str) -> None:
@@ -206,7 +200,7 @@ class VisaManager:
                 except Exception:
                     pass
                 del self.resource_cache[visa_address]
-                print(f"[VisaManager] Purged resource from cache: {visa_address}")
+                logger.info("VISAMANAGER", f"Purged resource from cache: {visa_address}")
 
     def purge_all_resources(self) -> None:
         """Closes and purges all cached resources."""
@@ -216,7 +210,7 @@ class VisaManager:
                     res.close()
                 except Exception:
                     pass
-                print(f"[VisaManager] Purged resource from cache: {addr}")
+                logger.info("VISAMANAGER", f"Purged resource from cache: {addr}")
             self.resource_cache.clear()
 
     def is_scannable_resource(self, addr: str) -> bool:
@@ -225,10 +219,8 @@ class VisaManager:
         if u.endswith("::INTFC") or u.endswith("::RAW"):
             return False
         if u.startswith("GPIB") and len(addr.split("::")) > 3:
-            # e.g., GPIB0::1::3::INSTR -> Skip secondary addresses
             return False
         if "USB" in u and "::0::INSTR" in u:
-            # Skip raw USB sub-interfaces that throw VI_ERROR_NCIC
             return False
         return True
 
@@ -236,13 +228,11 @@ class VisaManager:
         """Queries *IDN? of a resource with safety, returning None if failure."""
         is_mock = visa_address.upper().startswith("MOCK::")
         
-        # Check unresponsive cache for physical devices to avoid recurring timeout hangs
         if not is_mock and not force:
             with self.unresponsive_lock:
                 now = time.time()
                 if visa_address in self.unresponsive_cache:
                     last_fail = self.unresponsive_cache[visa_address]
-                    # Skip querying this address if it failed within the last 120 seconds
                     if now - last_fail < 120.0:
                         return None
 
@@ -276,7 +266,6 @@ class VisaManager:
                         
                 return idn
             except Exception:
-                # Mark as unresponsive without spamming purge/reconnect
                 if not is_mock:
                     with self.unresponsive_lock:
                         self.unresponsive_cache[visa_address] = time.time()
@@ -289,14 +278,11 @@ class VisaManager:
         """
         discovered: List[Dict[str, str]] = []
         
-        # 1. Query real physical resources
         physical_resources = self.list_physical_resources()
         for r in physical_resources:
-            # Skip secondary GPIB addresses to avoid massive timeout cascades
             if not self.is_scannable_resource(r):
                 continue
 
-            # Use a short 300ms timeout for scanning
             idn = self.query_idn(r, timeout_ms=300, force=False)
             discovered.append({
                 "visa_address": r,
@@ -305,7 +291,6 @@ class VisaManager:
                 "status": "online" if idn else "offline"
             })
             
-        # 2. Provide mock resources for testing/fallback
         mock_candidates = [
             "MOCK::DMM::INSTR",
             "MOCK::SCOPE::INSTR",
@@ -322,6 +307,15 @@ class VisaManager:
             
         return discovered
 
+    def create_fingerprint(self, idn: str) -> str:
+        """Constructs an IDN fingerprint string combining model and serial number if present."""
+        if not idn:
+            return ""
+        parts = [p.strip() for p in idn.split(",")]
+        model = parts[1] if len(parts) > 1 else parts[0]
+        serial = parts[2] if len(parts) > 2 and parts[2] not in ("", "0") else ""
+        return f"{model},{serial}" if serial else model
+
     def heal_mappings(self, current_mappings: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
         """
         USB Lottery Healing:
@@ -332,11 +326,10 @@ class VisaManager:
         if not current_mappings:
             return healing_actions
 
-        # Step 1: Scan all connected hardware
         scanned_devices = self.scan_all_hardware()
         scanned_online = [d for d in scanned_devices if d["status"] == "online" and d["idn"]]
+        scanned_by_addr = {d["visa_address"]: d["idn"] for d in scanned_online}
 
-        # Step 2: Iterate through each mapped virtual slot
         for addr_str, mapping in current_mappings.items():
             expected_visa_addr = mapping.get("visa_address", "")
             idn_pattern = mapping.get("idn_pattern", "").strip()
@@ -345,22 +338,21 @@ class VisaManager:
             if not idn_pattern:
                 continue
 
-            # Query current active address
-            current_idn = self.query_idn(expected_visa_addr, timeout_ms=1000)
-            
-            # Check if current IDN satisfies pattern
+            # Look up existing scan result first to avoid redundant query
+            current_idn = scanned_by_addr.get(expected_visa_addr)
+            if not current_idn:
+                current_idn = self.query_idn(expected_visa_addr, timeout_ms=500)
+
             if current_idn and idn_pattern.lower() in current_idn.lower():
                 continue
 
-            # Find matching online devices
             matches = [
                 dev for dev in scanned_online
                 if idn_pattern.lower() in dev["idn"].lower()
             ]
             
-            # Refuse ambiguous matches
             if len(matches) > 1:
-                print(f"[VisaManager] Healing skipped for slot {addr_str}: IDN pattern '{idn_pattern}' matches multiple active devices.")
+                logger.warning("HEALER", f"Healing skipped for slot {addr_str}: IDN pattern '{idn_pattern}' matches multiple active devices.")
                 continue
 
             if len(matches) == 1:
@@ -377,4 +369,5 @@ class VisaManager:
                     })
 
         return healing_actions
+
 

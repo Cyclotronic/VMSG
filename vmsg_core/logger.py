@@ -80,11 +80,17 @@ class SystemLogger:
         self.log("ERROR", category, message)
 
     def get_logs(self, since_id: int = 0) -> List[Dict[str, Any]]:
-        """Returns log entries, optionally filtering entries strictly after since_id."""
+        """Returns a list of log entries newer than the specified sequence ID."""
         with self.lock:
-            if since_id <= 0:
+            if since_id == 0:
                 return list(self.logs)
-            return [entry for entry in self.logs if entry.get("id", 0) > since_id]
+            out = []
+            for entry in reversed(self.logs):
+                if entry.get("id", 0) <= since_id:
+                    break
+                out.append(entry)
+            out.reverse()
+            return out
 
     def clear(self) -> None:
         """Clears the log buffer."""

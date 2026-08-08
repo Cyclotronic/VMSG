@@ -48,7 +48,6 @@ class ConfigManager:
                 try:
                     with open(self.filepath, "r") as f:
                         loaded = json.load(f)
-                        # Ensure basic keys exist
                         if "settings" not in loaded:
                             loaded["settings"] = copy.deepcopy(DEFAULT_CONFIG["settings"])
                         if "mappings" not in loaded:
@@ -68,6 +67,8 @@ class ConfigManager:
                 self.config = copy.deepcopy(DEFAULT_CONFIG)
                 self._save_config_unlocked()
         
+        # Ensure savecfg is initialized to 1 for VMSG operations
+        self.config["settings"]["savecfg"] = 1
         # Propagate config settings to global logger
         logger.configure(self.config["settings"])
 
@@ -135,10 +136,8 @@ class ConfigManager:
                             self.config["settings"][k] = val
                     else:
                         self.config["settings"][k] = v
-                else:
-                    self.config["settings"][k] = v
 
-            if persist and self.config["settings"].get("savecfg", 1) == 1:
+            if persist:
                 self._save_config_unlocked()
             
         # Dynamically sync configurations to global logger instance
@@ -171,8 +170,7 @@ class ConfigManager:
                 "idn_pattern": idn_pattern,
                 "description": description
             }
-            if self.config["settings"].get("savecfg", 1) == 1:
-                self._save_config_unlocked()
+            self._save_config_unlocked()
 
     def delete_mapping(self, address: int) -> bool:
         """Deletes mapping for a virtual address. Returns True if found and deleted."""
@@ -182,8 +180,7 @@ class ConfigManager:
             addr_str = str(address)
             if addr_str in self.config["mappings"]:
                 del self.config["mappings"][addr_str]
-                if self.config["settings"].get("savecfg", 1) == 1:
-                    self._save_config_unlocked()
+                self._save_config_unlocked()
                 return True
             return False
 
@@ -191,6 +188,6 @@ class ConfigManager:
         """Clears all address mappings."""
         with self.lock:
             self.config["mappings"] = {}
-            if self.config["settings"].get("savecfg", 1) == 1:
-                self._save_config_unlocked()
+            self._save_config_unlocked()
+
 

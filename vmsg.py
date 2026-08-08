@@ -59,8 +59,7 @@ async def main():
     logger.info("MAIN", "Starting servers...")
     
     # Run socket server and web server concurrently
-    socket_task = asyncio.create_task(socket_server.start())
-    web_task = asyncio.create_task(uvicorn_server.serve())
+    bg_tasks = set()
 
     # 6. Run USB Lottery Healing asynchronously after servers are up
     async def _async_startup_healing():
@@ -85,7 +84,12 @@ async def main():
         except Exception as e:
             logger.warning("HEALER", f"Startup Lottery Healing encountered an issue: {e}")
 
-    asyncio.create_task(_async_startup_healing())
+    task = asyncio.create_task(_async_startup_healing())
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
+
+    socket_task = asyncio.create_task(socket_server.start())
+    web_task = asyncio.create_task(uvicorn_server.serve())
 
     try:
         done, pending = await asyncio.wait(
