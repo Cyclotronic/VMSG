@@ -29,6 +29,8 @@ class PrologixSocketServer:
         self.config = config_manager
         self.visa_manager = visa_manager
         self.server: Optional[asyncio.Server] = None
+        self.extra_servers: Dict[int, asyncio.Server] = {}
+        self.port_slot_map: Dict[int, int] = {}
         self.active_connections = set()
         self.active_tasks = set()
         self.client_sessions: Dict[tuple, Dict[str, Any]] = {}
@@ -128,7 +130,9 @@ class PrologixSocketServer:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         
         logger.info("SOCKET_SERVER", f"VMSG TCP Socket Server started on {self.host}:{self.port} (Prologix compatible)")
-        
+
+        await self.sync_port_listeners()
+
         try:
             async with self.server:
                 await self.server.serve_forever()
@@ -137,9 +141,55 @@ class PrologixSocketServer:
         except Exception as e:
             logger.error("SOCKET_SERVER", f"TCP Socket Server loop encountered exception: {e}")
 
+    async def sync_port_listeners(self) -> Dict[str, Any]:
+        """Opens/closes dedicated per-slot listeners so they match the current config.
+
+        A client arriving on a dedicated port is pre-addressed to that slot, so it never
+        has to send ++addr - including after a reconnect that omits it.
+        """
+        desired = self.config.get_port_bindings()
+        opened, closed, failed = [], [], {}
+
+        for port in list(self.extra_servers.keys()):
+            if desired.get(port) != self.port_slot_map.get(port):
+                srv = self.extra_servers.pop(port)
+                self.port_slot_map.pop(port, None)
+                srv.close()
+                try:
+                    await asyncio.wait_for(srv.wait_closed(), timeout=1.0)
+                except Exception:
+                    pass
+                closed.append(port)
+
+        for port, slot in desired.items():
+            if port in self.extra_servers:
+                continue
+            try:
+                srv = await asyncio.start_server(self.handle_client, self.host, port, reuse_address=True)
+                self.extra_servers[port] = srv
+                self.port_slot_map[port] = slot
+                opened.append(port)
+                logger.info("SOCKET_SERVER", f"Dedicated listener started on {self.host}:{port} -> slot {slot}")
+            except OSError as e:
+                failed[port] = str(e)
+                logger.error("SOCKET_SERVER", f"Could not bind dedicated port {port} for slot {slot}: {e}")
+
+        return {"opened": opened, "closed": closed, "failed": failed,
+                "active": dict(self.port_slot_map)}
+
     async def stop(self) -> None:
         """Stops the TCP socket server."""
         self.is_running = False
+
+        for port, srv in list(self.extra_servers.items()):
+            srv.close()
+            try:
+                await asyncio.wait_for(srv.wait_closed(), timeout=1.0)
+            except Exception:
+                pass
+        self.extra_servers.clear()
+        self.port_slot_map.clear()
+
         if self.server:
             self.server.close()
             
@@ -171,7 +221,16 @@ class PrologixSocketServer:
         client_address = writer.get_extra_info('peername')
         logger.info("SOCKET_SERVER", f"New client connection established from {client_address}")
         self.active_connections.add(client_address)
-        self.client_sessions[client_address] = self.config.get_settings().copy()
+        session = self.config.get_settings().copy()
+
+        local = writer.get_extra_info('sockname')
+        bound_slot = self.port_slot_map.get(local[1]) if local else None
+        if bound_slot is not None:
+            session["addr"] = bound_slot
+            logger.info("SOCKET_SERVER",
+                        f"[{client_address[0]}:{client_address[1]}] Arrived on dedicated port {local[1]} -> slot {bound_slot}")
+
+        self.client_sessions[client_address] = session
 
         current_task = asyncio.current_task()
         if current_task:
@@ -213,6 +272,8 @@ class PrologixSocketServer:
 
         except asyncio.CancelledError:
             pass
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, ConnectionRefusedError, asyncio.IncompleteReadError):
+            logger.info("SOCKET_SERVER", f"Client {client_address} disconnected abruptly")
         except Exception as e:
             logger.error("SOCKET_SERVER", f"Error serving client {client_address}: {e}", exc_info=True)
         finally:

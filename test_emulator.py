@@ -1,12 +1,33 @@
 import socket
+import sys
 import time
 import urllib.request
+import urllib.error
 import json
 import concurrent.futures
 
 BASE_URL = "http://127.0.0.1:8080"
 SOCKET_HOST = "127.0.0.1"
 SOCKET_PORT = 1234
+
+def api_get(path):
+    """GET helper returning parsed JSON."""
+    with urllib.request.urlopen(f"{BASE_URL}{path}") as res:
+        return json.loads(res.read().decode())
+
+def snapshot_config():
+    """Captures the gateway's full persistent config (settings + mappings)."""
+    return api_get("/api/config/backup")
+
+def restore_config(snapshot):
+    """Restores a config snapshot so the suite leaves the gateway exactly as found."""
+    req = urllib.request.Request(
+        f"{BASE_URL}/api/config/restore",
+        data=json.dumps(snapshot).encode(),
+        headers={'Content-Type': 'application/json'}
+    )
+    with urllib.request.urlopen(req) as res:
+        return json.loads(res.read().decode())
 
 def api_put_mapping(addr, visa_addr, idn_pat, desc):
     """Sets a virtual mapping via the FastAPI HTTP REST API."""
@@ -30,12 +51,17 @@ def api_put_mapping(addr, visa_addr, idn_pat, desc):
         return None
 
 def api_delete_mapping(addr):
-    """Deletes a virtual mapping via the FastAPI HTTP REST API."""
+    """Deletes a virtual mapping via the FastAPI HTTP REST API. A 404 (already
+    unmapped) is not an error."""
     url = f"{BASE_URL}/api/mappings/{addr}"
     req = urllib.request.Request(url, method='DELETE')
     try:
         with urllib.request.urlopen(req) as response:
             return json.loads(response.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print(f"[-] API Delete Error: {e}")
+        return None
     except Exception as e:
         print(f"[-] API Delete Error: {e}")
         return None
@@ -78,20 +104,27 @@ def main():
     except Exception as e:
         print(f"[-] API Connection Error: {e}")
         print("[-] Ensure VMSG gateway server is running (python -u vmsg.py) before running tests.")
-        return
+        sys.exit(1)
 
-    # Step 1: Pre-populate mock instruments in mappings via Web API
-    print("[*] Configuring Virtual Mappings for Test Harness...")
-    api_put_mapping(1, "MOCK::DMM::INSTR", "HEWLETT-PACKARD,34401A", "Mock HP Multimeter")
-    api_put_mapping(2, "MOCK::SCOPE::INSTR", "TEKTRONIX,TDS 2024", "Mock Tek Scope")
-    api_put_mapping(3, "MOCK::GENERIC::HP_53131A::INSTR", "HP_53131A", "Mock Counter")
-    print("[+] Base test mappings configured successfully.")
+    # Snapshot the live config FIRST: the suite mutates mappings (mock setup,
+    # auto-assign, healing) and must hand the gateway back exactly as it found it.
+    print("[*] Snapshotting live gateway configuration (will be restored at exit)...")
+    original_config = snapshot_config()
+    print(f"[+] Snapshot captured: {len(original_config.get('mappings', {}))} mapping(s).")
 
-    # Connect primary control socket
-    s = connect_socket()
-    print("[+] Primary TCP Socket connected successfully to port 1234.")
-
+    passed = False
+    s = None
     try:
+        # Step 1: Pre-populate mock instruments in mappings via Web API
+        print("[*] Configuring Virtual Mappings for Test Harness...")
+        api_put_mapping(1, "MOCK::DMM::INSTR", "HEWLETT-PACKARD,34401A", "Mock HP Multimeter")
+        api_put_mapping(2, "MOCK::SCOPE::INSTR", "TEKTRONIX,TDS 2024", "Mock Tek Scope")
+        api_put_mapping(3, "MOCK::GENERIC::HP_53131A::INSTR", "HP_53131A", "Mock Counter")
+        print("[+] Base test mappings configured successfully.")
+
+        # Connect primary control socket
+        s = connect_socket()
+        print("[+] Primary TCP Socket connected successfully to port 1234.")
         # Test 1: Query version
         print("\n[Test 1] Querying Prologix Controller version (++ver)...")
         s.sendall(b"++ver\n")
@@ -285,6 +318,9 @@ def main():
 
         # Test 15: Unmapped Address Timeout Protocol Handling
         print("\n[Test 15] Testing Unmapped Address Protocol Response...")
+        # Slot 30 must actually be unmapped for this test; the snapshot restore
+        # at exit brings back whatever the user had there.
+        api_delete_mapping(30)
         s.sendall(b"++addr 30\n")
         time.sleep(0.02)
         s.sendall(b"++read eoi\n")
@@ -301,14 +337,27 @@ def main():
         print("  ALL 15 INTEGRATION TESTS PASSED SUCCESSFULLY 100%!  ")
         print("  Your VISA Mapping TCP/IP Socket Gateway (VMSG) Test Harness is Complete. ")
         print("================================================================================")
+        passed = True
 
     except AssertionError as e:
         print(f"\n[-] Assertion Failed during verification: {e}")
     except Exception as e:
         print(f"\n[-] Error during test execution: {e}")
     finally:
-        s.close()
-        print("[*] Primary Control Socket closed.")
+        if s is not None:
+            s.close()
+            print("[*] Primary Control Socket closed.")
+        try:
+            restore_config(original_config)
+            print("[+] Gateway configuration restored to pre-test snapshot.")
+        except Exception as e:
+            print(f"[-] FAILED to restore gateway configuration: {e}")
+            print(f"[-] Recover manually by POSTing this snapshot to {BASE_URL}/api/config/restore:")
+            print(json.dumps(original_config))
+            passed = False
+
+    if not passed:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

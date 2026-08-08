@@ -235,6 +235,67 @@
                 </form>
             </section>
 
+            <!-- Host Device Discovery & TestController Integration -->
+            <section class="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
+                <div class="flex items-center space-x-2 mb-4 border-b border-slate-200 dark:border-white/5 pb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                    </svg>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">Host Discovery & TestController</h2>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">TestController Scans Serial Ports</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Emits <code class="text-cyber-teal font-mono">ScanSerialPorts</code> in the export. Off keeps TestController on VMSG sockets only.</p>
+                        </div>
+                        <input type="checkbox" id="set-tc-scan-serial" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div id="tc-serial-port-list" class="border border-slate-200 dark:border-cyber-border rounded-xl p-3 bg-slate-50 dark:bg-slate-900/60 space-y-2">
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400">Loading host serial ports&hellip;</p>
+                    </div>
+
+                    <div class="border-t border-slate-200 dark:border-white/5 pt-3">
+                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">TestController Devices Folder</label>
+                        <input type="text" id="set-tc-devices-path" placeholder="C:\Users\you\Documents\TestController\Devices" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-xs font-mono outline-none transition duration-150 text-slate-800 dark:text-slate-200">
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Validates exported driver names against your install. Unknown names are excluded &mdash; TestController drops every device after one it cannot resolve.</p>
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Force Address On Reconnect</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Adds <code class="text-cyber-teal font-mono">++addr N</code> to each controller's settings field so TestController re-addresses after a Reconnect.</p>
+                        </div>
+                        <input type="checkbox" id="set-tc-force-addr" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Dedicated Port Per Device</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Each mapped slot gets its own listener, so clients need no <code class="text-cyber-teal font-mono">++addr</code> at all. Default off (single port 1234).</p>
+                        </div>
+                        <input type="checkbox" id="set-multi-port" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div id="multi-port-controls" class="hidden space-y-2">
+                        <div class="flex items-center space-x-2">
+                            <label class="text-[10px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">Base Port</label>
+                            <input type="number" id="set-multi-port-base" min="1025" max="65000" class="w-24 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal rounded-lg px-2 py-1 text-xs font-mono outline-none text-slate-800 dark:text-slate-200">
+                            <button id="btn-assign-ports" type="button" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-cyber-border hover:border-cyber-teal text-slate-700 dark:text-slate-200 rounded-lg py-1.5 text-[11px] font-bold font-title tracking-wider transition duration-150">
+                                Assign Ports To All Slots
+                            </button>
+                        </div>
+                        <div id="port-binding-list" class="text-[10px] font-mono text-slate-500 dark:text-slate-400"></div>
+                    </div>
+
+                    <button id="btn-save-discovery" type="button" class="w-full bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-sm font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 active:scale-[0.98] transition duration-150 mt-1">
+                        Apply Discovery Settings
+                    </button>
+                </div>
+            </section>
+
             <!-- Configuration Backup & Restore Widget -->
             <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
                 <div class="flex items-center space-x-2 mb-4 border-b border-white/5 pb-3">
@@ -591,6 +652,12 @@
                     <input type="text" id="modal-description" placeholder="e.g. HP Multimeter Bench Top" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-100">
                 </div>
 
+                <div id="modal-port-row" class="hidden">
+                    <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Dedicated Listener Port <span class="text-slate-400 dark:text-slate-500 normal-case tracking-normal">(optional)</span></label>
+                    <input type="number" id="modal-listen-port" min="1025" max="65000" placeholder="blank = shared port 1234" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-mono outline-none transition text-slate-800 dark:text-slate-100">
+                    <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">A client connecting here is addressed to this slot automatically, with no <code class="text-cyber-teal font-mono">++addr</code> required.</p>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/5 pt-4 mt-2">
                     <button type="button" id="modal-btn-delete" class="bg-cyber-rose/5 dark:bg-cyber-rose/10 border border-cyber-rose/20 hover:bg-cyber-rose/15 dark:hover:bg-cyber-rose/20 text-cyber-rose rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150">
                         Delete Mapping
@@ -740,6 +807,10 @@
                     <label class="flex items-center space-x-2 cursor-pointer text-slate-700 dark:text-rose-400 hover:text-slate-900 dark:hover:text-rose-300 transition">
                         <input type="checkbox" id="visa-force-overwrite" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-rose-500 focus:ring-0 w-4 h-4 cursor-pointer">
                         <span class="font-medium text-xs">Force Overwrite Existing Mappings</span>
+                    </label>
+                    <label id="visa-assign-ports-label" class="hidden items-center space-x-2 cursor-pointer text-slate-700 dark:text-cyber-teal hover:text-slate-900 dark:hover:text-teal-300 transition" title="Give each assigned slot its own TCP listener port">
+                        <input type="checkbox" id="visa-assign-ports" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                        <span class="font-medium text-xs">Assign Dedicated Ports</span>
                     </label>
                     <button id="btn-assign-selected-visa" onclick="autoAssignSelectedVisa()" class="bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white font-bold rounded-xl px-4 py-2 text-xs font-title tracking-wider shadow-lg transition flex items-center space-x-1.5 active:scale-[0.98]">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1144,6 +1215,7 @@
                     if (document.getElementById('set-scan-serial-ports')) {
                         document.getElementById('set-scan-serial-ports').checked = !!appState.settings.scan_serial_ports;
                     }
+                    syncDiscoveryPanel();
                     
                     // Sync logging parameters
                     document.getElementById('set-log-level').value = appState.settings.log_level || 'INFO';
@@ -1295,6 +1367,145 @@
             }
         };
 
+        // ---- Host discovery & TestController integration panel ----
+        async function refreshSerialPorts() {
+            const box = document.getElementById('tc-serial-port-list');
+            if (!box) return;
+            try {
+                const res = await fetch('/api/host/serial_ports');
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    box.innerHTML = `<p class="text-[10px] text-slate-500 dark:text-slate-400">Serial port discovery unavailable: ${data.detail || 'unknown'}</p>`;
+                    return;
+                }
+                if (!data.ports.length) {
+                    box.innerHTML = `<p class="text-[10px] text-slate-500 dark:text-slate-400">No serial ports detected on this host.</p>`;
+                    return;
+                }
+                box.innerHTML = `<p class="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Exclude From TestController</p>` +
+                    data.ports.map(p => `
+                        <label class="flex items-center justify-between cursor-pointer py-0.5">
+                            <span class="text-[11px] text-slate-700 dark:text-slate-300">
+                                <span class="font-mono font-bold">${p.device}</span>
+                                <span class="text-slate-500 dark:text-slate-500"> ${p.description}</span>
+                            </span>
+                            <input type="checkbox" class="tc-serial-exclude rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                                   data-device="${p.device}" ${p.excluded ? 'checked' : ''}>
+                        </label>`).join('');
+            } catch (err) {
+                box.innerHTML = `<p class="text-[10px] text-rose-400">Could not list serial ports: ${err}</p>`;
+            }
+        }
+
+        async function refreshPortBindings() {
+            const list = document.getElementById('port-binding-list');
+            if (!list) return;
+            try {
+                const data = await (await fetch('/api/ports')).json();
+                const configured = data.configured || {};
+                const bound = data.bound || {};
+                const ports = Object.keys(configured).sort((a, b) => a - b);
+                if (!ports.length) {
+                    list.innerHTML = 'No slots have dedicated ports yet.';
+                    return;
+                }
+                list.innerHTML = ports.map(p => {
+                    const live = bound[p] !== undefined;
+                    return `<div>slot ${configured[p]} &rarr; :${p} <span class="${live ? 'text-cyber-teal' : 'text-rose-400'}">${live ? 'listening' : 'not bound'}</span></div>`;
+                }).join('');
+            } catch (err) {
+                list.innerHTML = `Could not read port bindings: ${err}`;
+            }
+        }
+
+        function syncDiscoveryPanel() {
+            const s = appState.settings || {};
+            const el = id => document.getElementById(id);
+            if (el('set-tc-scan-serial')) el('set-tc-scan-serial').checked = !!s.tc_scan_serial_ports;
+            if (el('set-tc-force-addr')) el('set-tc-force-addr').checked = s.tc_force_addr !== false;
+            if (el('set-multi-port')) el('set-multi-port').checked = !!s.multi_port_enabled;
+            if (el('set-multi-port-base') && document.activeElement !== el('set-multi-port-base')) {
+                el('set-multi-port-base').value = s.multi_port_base || 1235;
+            }
+            if (el('set-tc-devices-path') && document.activeElement !== el('set-tc-devices-path')) {
+                el('set-tc-devices-path').value = s.tc_devices_path || '';
+            }
+            const controls = el('multi-port-controls');
+            if (controls) controls.classList.toggle('hidden', !s.multi_port_enabled);
+
+            // The auto-assign port option only makes sense in multi-port mode
+            const portsLabel = el('visa-assign-ports-label');
+            if (portsLabel) {
+                portsLabel.classList.toggle('hidden', !s.multi_port_enabled);
+                portsLabel.classList.toggle('flex', !!s.multi_port_enabled);
+            }
+        }
+
+        document.getElementById('set-multi-port').onchange = (e) => {
+            document.getElementById('multi-port-controls').classList.toggle('hidden', !e.target.checked);
+        };
+
+        document.getElementById('btn-save-discovery').onclick = async () => {
+            const excluded = Array.from(document.querySelectorAll('.tc-serial-exclude'))
+                .filter(cb => cb.checked).map(cb => cb.dataset.device).join(',');
+            const payload = {
+                tc_scan_serial_ports: document.getElementById('set-tc-scan-serial').checked,
+                tc_force_addr: document.getElementById('set-tc-force-addr').checked,
+                tc_devices_path: document.getElementById('set-tc-devices-path').value.trim(),
+                tc_excluded_serial_ports: excluded,
+                multi_port_enabled: document.getElementById('set-multi-port').checked,
+                multi_port_base: parseInt(document.getElementById('set-multi-port-base').value) || 1235
+            };
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    appendConsoleMessage('SYSTEM', 'Host discovery and TestController settings updated.');
+                    await fetchState();
+                    await refreshPortBindings();
+                } else {
+                    alert(`Error: ${data.detail}`);
+                }
+            } catch (err) {
+                alert(`API Error: ${err}`);
+            }
+        };
+
+        document.getElementById('btn-assign-ports').onclick = async () => {
+            const base = parseInt(document.getElementById('set-multi-port-base').value) || 1235;
+            const slots = Object.keys(appState.mappings || {}).map(Number).filter(n => n !== 0).sort((a, b) => a - b);
+            if (!slots.length) { alert('No mapped slots to assign ports to.'); return; }
+            let port = base;
+            for (const slot of slots) {
+                const m = appState.mappings[String(slot)];
+                if (port === 1234) port++;
+                const body = {
+                    visa_address: m.visa_address,
+                    idn_pattern: m.idn_pattern || '',
+                    description: m.description || '',
+                    listen_port: port
+                };
+                const res = await fetch(`/api/mappings/${slot}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert(`Slot ${slot}: ${err.detail}`);
+                    break;
+                }
+                port++;
+            }
+            appendConsoleMessage('SYSTEM', `Assigned dedicated ports from ${base} to ${slots.length} slot(s).`);
+            await fetchState();
+            await refreshPortBindings();
+        };
+
         async function healSingleSlot(slot) {
             appendConsoleMessage('SYSTEM', `Checking USB port healing for virtual slot ${slot}...`);
             try {
@@ -1354,11 +1565,15 @@
             // Rebuild dropdown to include any newly discovered physical or mock devices
             populateDiscoveredDropdown();
 
+            // The dedicated-port field only applies in multi-port mode
+            document.getElementById('modal-port-row').classList.toggle('hidden', !appState.settings.multi_port_enabled);
+
             const mapping = appState.mappings[address.toString()];
             if (mapping) {
                 document.getElementById('modal-visa-address').value = mapping.visa_address;
                 document.getElementById('modal-idn-pattern').value = mapping.idn_pattern || '';
                 document.getElementById('modal-description').value = mapping.description || '';
+                document.getElementById('modal-listen-port').value = mapping.listen_port || '';
                 document.getElementById('modal-btn-delete').style.display = 'block';
 
                 // Try to select the matched resource address in the dropdown
@@ -1367,6 +1582,7 @@
                 document.getElementById('modal-visa-address').value = '';
                 document.getElementById('modal-idn-pattern').value = '';
                 document.getElementById('modal-description').value = '';
+                document.getElementById('modal-listen-port').value = '';
                 document.getElementById('modal-btn-delete').style.display = 'none';
 
                 // Clear dropdown selection
@@ -1391,10 +1607,12 @@
         document.getElementById('mapping-form').onsubmit = async (e) => {
             e.preventDefault();
             const address = document.getElementById('modal-addr').value;
+            const portRaw = document.getElementById('modal-listen-port').value.trim();
             const payload = {
                 visa_address: document.getElementById('modal-visa-address').value.trim(),
                 idn_pattern: document.getElementById('modal-idn-pattern').value.trim(),
-                description: document.getElementById('modal-description').value.trim()
+                description: document.getElementById('modal-description').value.trim(),
+                listen_port: portRaw ? parseInt(portRaw) : null
             };
 
             try {
@@ -1407,6 +1625,7 @@
                     document.getElementById('mapping-modal').classList.add('hidden');
                     appendConsoleMessage('SYSTEM', `Saved mapping for Virtual Address ${address}.`);
                     fetchState();
+                    refreshPortBindings();
                 } else {
                     const data = await res.json();
                     alert(`Error saving mapping: ${data.detail}`);
@@ -1779,6 +1998,8 @@
             alert("Note: GPIB Address 0 will not be used for auto-assignment for controller compatibility reasons.");
 
             const forceOverwrite = document.getElementById('visa-force-overwrite')?.checked || false;
+            const assignPorts = document.getElementById('visa-assign-ports')?.checked || false;
+            let nextPort = parseInt(appState.settings.multi_port_base) || 1235;
             const assignedSlots = [];
 
             if (forceOverwrite) {
@@ -1832,6 +2053,8 @@
                     desc = `${parts[0].trim()} ${parts[1].trim()}`;
                 }
 
+                if (assignPorts && nextPort === 1234) nextPort++;
+
                 try {
                     const res = await fetch(`/api/mappings/${slot}`, {
                         method: 'PUT',
@@ -1839,7 +2062,8 @@
                         body: JSON.stringify({
                             visa_address: visaAddr,
                             idn_pattern: idnPattern,
-                            description: desc
+                            description: desc,
+                            listen_port: assignPorts ? nextPort++ : null
                         })
                     });
                     if (res.ok) {
@@ -2210,6 +2434,8 @@
         // Initialize state syncing on load
         fetchState();
         fetchLogs();
+        refreshSerialPorts();
+        refreshPortBindings();
 
         // Perform an initial background scan to auto-populate the mapping dropdown list
         async function performBackgroundScan() {

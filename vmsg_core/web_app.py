@@ -17,6 +17,7 @@ class MappingModel(BaseModel):
     visa_address: str = Field(..., description="The physical or mock VISA resource string")
     idn_pattern: str = Field("", description="Substring to look for in IDN response for USB auto-healing")
     description: str = Field("", description="Human-readable label for the instrument")
+    listen_port: Optional[int] = Field(None, ge=1025, le=65000, description="Dedicated TCP listener port for this slot (multi-port mode)")
 
 class SettingsModel(BaseModel):
     addr: Optional[int] = Field(None, ge=0, le=30)
@@ -32,6 +33,12 @@ class SettingsModel(BaseModel):
     unmapped_behavior: Optional[str] = Field(None, description="Behavior for unmapped virtual addresses: 'message' or 'timeout'")
     auto_heal_usb: Optional[bool] = Field(None, description="Toggle auto USB lottery healing")
     scan_serial_ports: Optional[bool] = Field(None, description="Toggle PyVISA scanning of ASRL serial/COM ports")
+    tc_scan_serial_ports: Optional[bool] = Field(None, description="Emit ScanSerialPorts:1 in the TestController export")
+    tc_excluded_serial_ports: Optional[str] = Field(None, description="Comma-separated host serial ports TestController should skip")
+    tc_force_addr: Optional[bool] = Field(None, description="Emit settings:++addr N so TestController re-addresses on every reconnect")
+    tc_devices_path: Optional[str] = Field(None, description="Path to the TestController Devices folder, used to validate driver names")
+    multi_port_enabled: Optional[bool] = Field(None, description="Give mapped slots their own TCP listener ports")
+    multi_port_base: Optional[int] = Field(None, ge=1025, le=65000, description="First port used when auto-allocating dedicated ports")
     log_level: Optional[str] = Field(None, description="Logging verbosity (DEBUG, INFO, WARN, ERROR)")
     enable_stdout: Optional[bool] = Field(None, description="Toggle standard output console printing")
     log_category_traffic: Optional[bool] = Field(None, description="Toggle traffic logs")
@@ -45,6 +52,24 @@ class ConsoleCommandModel(BaseModel):
 class AutoAssignModel(BaseModel):
     force_overwrite: bool = Field(False, description="Whether to overwrite existing slot mappings")
     include_mocks: bool = Field(True, description="Whether to include simulated mock devices in auto-assignment")
+    assign_ports: bool = Field(False, description="Also give each assigned slot its own dedicated listener port")
+
+# TestController driver names that ship with stock TestController. The exporter must never
+# emit a name outside this set: InterfaceThreads.addDevicesShared() uses `break` (not
+# `continue`) when a driver is unknown, so one bad name silently drops every device after
+# it. See TESTCONTROLLER_NOTES.md.
+KNOWN_TC_DRIVERS = {
+    "Agilent 34401A", "Hewlett-Packard 34401A", "Agilent 34410A", "Agilent 34411A",
+    "Keysight 34460A", "Keysight 34461A", "Keysight 34465A", "Agilent 3458A",
+    "Keithley 2000", "Keithley 2001", "Keithley 2001M", "Keithley 2002",
+    "Keithley 2010", "Keithley 2015", "Keithley 199", "HP3478A",
+    "Fluke 45", "Fluke 8845A", "Fluke PM6685", "Fluke PM6690",
+    "Agilent 53131A", "Agilent 53132A", "Agilent 53181A",
+    "Agilent 33250A", "Keysight 33250A",
+    "HP E3632A", "HP E3633A", "HP E3634A",
+    "Siglent SDM3055", "Siglent SDM3065X", "R&S HMC8012",
+}
+
 
 def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> FastAPI:
     """Creates and configures the FastAPI application instance."""
@@ -117,8 +142,17 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     def get_mappings():
         return app.state.config.get_mappings()
 
+    async def _apply_port_bindings() -> None:
+        """Re-syncs dedicated listeners after anything that can change them."""
+        srv = app.state.socket_server
+        if srv:
+            try:
+                await srv.sync_port_listeners()
+            except Exception as e:
+                logger.warning("WEB_API", f"Could not sync dedicated listener ports: {e}")
+
     @api.put("/mappings/{address}")
-    def update_mapping(address: int, data: MappingModel):
+    async def update_mapping(address: int, data: MappingModel):
         if not (0 <= address <= 30):
             raise HTTPException(status_code=400, detail="Address must be between 0 and 30")
         try:
@@ -126,31 +160,38 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 address=address,
                 visa_address=data.visa_address,
                 idn_pattern=data.idn_pattern,
-                description=data.description
+                description=data.description,
+                listen_port=data.listen_port
             )
-            logger.info("WEB_API", f"Updated virtual address {address} mapping -> {data.visa_address}")
-            return {"status": "success", "message": f"Mapping for address {address} updated."}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+        logger.info("WEB_API", f"Updated virtual address {address} mapping -> {data.visa_address}")
+        await _apply_port_bindings()
+        return {"status": "success", "message": f"Mapping for address {address} updated."}
+
     @api.delete("/mappings/{address}")
-    def delete_mapping(address: int):
+    async def delete_mapping(address: int):
         if not (0 <= address <= 30):
             raise HTTPException(status_code=400, detail="Address must be between 0 and 30")
         deleted = app.state.config.delete_mapping(address)
         if deleted:
             logger.info("WEB_API", f"Deleted virtual address {address} mapping")
+            await _apply_port_bindings()
             return {"status": "success", "message": f"Mapping for address {address} deleted."}
         else:
             raise HTTPException(status_code=404, detail=f"No mapping found for address {address}")
 
     @api.delete("/mappings")
-    def clear_all_mappings(confirm: bool = False):
+    async def clear_all_mappings(confirm: bool = False):
         if not confirm:
             raise HTTPException(status_code=400, detail="Confirmation required to clear all mappings. Pass ?confirm=true")
         try:
             app.state.config.clear_all_mappings()
             logger.info("WEB_API", "Cleared all virtual address mappings")
+            await _apply_port_bindings()
             return {"status": "success", "message": "All virtual address mappings cleared."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -172,13 +213,15 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         return app.state.config.get_settings()
 
     @api.post("/settings")
-    def update_settings(data: SettingsModel):
+    async def update_settings(data: SettingsModel):
         try:
             # Filter None fields
             updates = {k: v for k, v in data.model_dump().items() if v is not None}
             if updates:
                 app.state.config.update_settings(updates)
                 logger.info("WEB_API", f"Prologix settings updated: {updates}")
+                if "multi_port_enabled" in updates or "multi_port_base" in updates:
+                    await _apply_port_bindings()
             return {"status": "success", "settings": app.state.config.get_settings()}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -209,24 +252,34 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 try:
                     addr_val = int(addr_str)
                     if 0 <= addr_val <= 30:
-                        restored_mappings[str(addr_val)] = {
+                        entry = {
                             "visa_address": str(m_data.get("visa_address", "")),
                             "idn_pattern": str(m_data.get("idn_pattern", "")),
                             "description": str(m_data.get("description", ""))
                         }
+                        port = m_data.get("listen_port")
+                        if port is not None:
+                            try:
+                                port = int(port)
+                                if 1025 <= port <= 65000 and port != 1234:
+                                    entry["listen_port"] = port
+                            except (TypeError, ValueError):
+                                pass
+                        restored_mappings[str(addr_val)] = entry
                 except ValueError:
                     continue
-            
+
             # Apply settings & mappings
             if isinstance(data.get("settings"), dict):
                 app.state.config.update_settings(data["settings"], persist=False)
-            
+
             app.state.config.config["mappings"] = restored_mappings
             app.state.config.save_config()
-            
+
             # Dynamically propagate logging config to logger
             logger.configure(app.state.config.get_settings())
-            
+            await _apply_port_bindings()
+
             logger.info("WEB_API", "Configuration successfully restored from uploaded JSON backup.")
             return {
                 "status": "success",
@@ -274,7 +327,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                         address=addr,
                         visa_address=new_addr,
                         idn_pattern=mapping_entry["idn_pattern"],
-                        description=mapping_entry["description"]
+                        description=mapping_entry["description"],
+                        listen_port=mapping_entry.get("listen_port")
                     )
                     logger.info("HEALER", f"Healed Address {addr}: {action['old_visa_address']} -> {new_addr}")
 
@@ -289,16 +343,24 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             raise HTTPException(status_code=500, detail=f"Healing failed: {e}")
 
     @api.post("/auto_assign")
-    def auto_assign_devices(data: AutoAssignModel):
+    async def auto_assign_devices(data: AutoAssignModel):
         """
-        Scans all online hardware/mock devices and auto-assigns them to 
-        available virtual GPIB addresses (0-30). Preserves offline device 
+        Scans all online hardware/mock devices and auto-assigns them to
+        available virtual GPIB addresses (0-30). Preserves offline device
         mappings and fingerprints even when force_overwrite is True.
         """
         try:
             force_overwrite = data.force_overwrite
             include_mocks = data.include_mocks
-            logger.info("WEB_API", f"Auto-assignment triggered. Force overwrite: {force_overwrite}, Include Mocks: {include_mocks}")
+            assign_ports = data.assign_ports
+            logger.info("WEB_API", f"Auto-assignment triggered. Force overwrite: {force_overwrite}, Include Mocks: {include_mocks}, Assign ports: {assign_ports}")
+
+            def _port_for(slot: int) -> Optional[int]:
+                """Keeps a slot's existing dedicated port; allocates one only when asked."""
+                existing = current_mappings.get(str(slot), {}).get("listen_port")
+                if existing:
+                    return int(existing)
+                return app.state.config.next_free_port() if assign_ports else None
             
             # Scan connected hardware
             scan_serial = app.state.config.get_setting("scan_serial_ports", False)
@@ -336,22 +398,26 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 # If force_overwrite is True and device is already mapped, update its slot in-place
                 if v_addr in mapped_visa_addrs and force_overwrite:
                     assigned_slot = int(mapped_visa_addrs[v_addr])
+                    port = _port_for(assigned_slot)
                     app.state.config.set_mapping(
                         address=assigned_slot,
                         visa_address=v_addr,
                         idn_pattern=fingerprint,
-                        description=desc
+                        description=desc,
+                        listen_port=port
                     )
                     assigned_actions.append({
                         "virtual_address": assigned_slot,
                         "visa_address": v_addr,
                         "description": desc,
+                        "listen_port": port,
                         "overwritten": True
                     })
                     current_mappings[str(assigned_slot)] = {
                         "visa_address": v_addr,
                         "idn_pattern": fingerprint,
-                        "description": desc
+                        "description": desc,
+                        "listen_port": port
                     }
                     continue
 
@@ -368,27 +434,34 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     break
                     
                 cand_str = str(assigned_slot)
+                port = _port_for(assigned_slot)
                 app.state.config.set_mapping(
                     address=assigned_slot,
                     visa_address=v_addr,
                     idn_pattern=fingerprint,
-                    description=desc
+                    description=desc,
+                    listen_port=port
                 )
-                
+
                 assigned_actions.append({
                     "virtual_address": assigned_slot,
                     "visa_address": v_addr,
                     "description": desc,
+                    "listen_port": port,
                     "overwritten": False
                 })
-                
+
                 current_mappings[cand_str] = {
                     "visa_address": v_addr,
                     "idn_pattern": fingerprint,
-                    "description": desc
+                    "description": desc,
+                    "listen_port": port
                 }
                 mapped_visa_addrs[v_addr] = assigned_slot
-                    
+
+            if assign_ports:
+                await _apply_port_bindings()
+
             return {
                 "status": "success",
                 "assigned_count": len(assigned_actions),
@@ -399,103 +472,250 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             logger.error("WEB_API", f"Auto-assignment failed: {e}")
             raise HTTPException(status_code=500, detail=f"Auto-assignment failed: {e}")
 
+    def _load_tc_driver_names() -> tuple:
+        """Valid TestController driver names, read from the user's Devices folder when
+        configured so the check tracks their actual install; falls back to the built-in set."""
+        path = (app.state.config.get_setting("tc_devices_path", "") or "").strip()
+        if path and os.path.isdir(path):
+            names = set()
+            try:
+                for entry in os.listdir(path):
+                    if not entry.lower().endswith(".txt"):
+                        continue
+                    with open(os.path.join(path, entry), "r", encoding="utf-8", errors="replace") as fh:
+                        for line in fh:
+                            if line.startswith("#name"):
+                                name = line[5:].strip()
+                                if name:
+                                    names.add(name)
+            except Exception as e:
+                logger.warning("WEB_API", f"Could not read TestController Devices folder '{path}': {e}")
+                return KNOWN_TC_DRIVERS, "builtin"
+            if names:
+                return names, path
+        return KNOWN_TC_DRIVERS, "builtin"
+
+    def _map_to_testcontroller_driver(idn: str, visa_address: str, description: str) -> Optional[str]:
+        """Maps an instrument to a stock TestController driver name, or None when unknown.
+
+        Returning None is deliberate: a guessed name is worse than no entry, because
+        TestController aborts loading every remaining device when it meets one it
+        does not recognise.
+        """
+        combined = f"{idn} {description} {visa_address}".upper()
+
+        if "34401A" in combined:
+            return "Agilent 34401A"
+        if "34411A" in combined:
+            return "Agilent 34411A"
+        if "34410A" in combined:
+            return "Agilent 34410A"
+        if "34461A" in combined:
+            return "Keysight 34461A"
+        if "34465A" in combined:
+            return "Keysight 34465A"
+        if "34460A" in combined:
+            return "Keysight 34460A"
+        if "3458A" in combined:
+            return "Agilent 3458A"
+        if "3478A" in combined:
+            return "HP3478A"
+        if "2001M" in combined:
+            return "Keithley 2001M"
+        if "2002" in combined:
+            return "Keithley 2002"
+        if "2001" in combined:
+            return "Keithley 2001"
+        if "2010" in combined:
+            return "Keithley 2010"
+        if "2015" in combined:
+            return "Keithley 2015"
+        if "MODEL 2000" in combined or "KEITHLEY 2000" in combined:
+            return "Keithley 2000"
+        if "PM6690" in combined:
+            return "Fluke PM6690"
+        if "PM6685" in combined:
+            return "Fluke PM6685"
+        if "53131A" in combined:
+            return "Agilent 53131A"
+        if "53132A" in combined:
+            return "Agilent 53132A"
+        if "53181A" in combined:
+            return "Agilent 53181A"
+        if "33250A" in combined:
+            return "Agilent 33250A"
+        if "E3632A" in combined:
+            return "HP E3632A"
+        if "E3633A" in combined:
+            return "HP E3633A"
+        if "E3634A" in combined:
+            return "HP E3634A"
+        if "SDM3065" in combined:
+            return "Siglent SDM3065X"
+        if "SDM3055" in combined:
+            return "Siglent SDM3055"
+        if "HMC8012" in combined:
+            return "R&S HMC8012"
+        return None
+
     # 4b. TestController Subtool Configuration Generator
     @api.get("/testcontroller/config")
-    def get_testcontroller_config(controller_id: str = "A", host: str = "127.0.0.1", separate_adapters: bool = True):
+    def get_testcontroller_config(controller_id: str = "A", host: str = "127.0.0.1",
+                                  separate_adapters: bool = True, use_ports: Optional[bool] = None):
         """
-        Generates settingsGPIB.txt and settingsLoad.txt configurations for TestController 
-        based on active VMSG instrument mappings.
+        Generates settingsGPIB.txt and settingsLoad.txt for TestController from the
+        active VMSG mappings.
+
+        Devices whose instrument does not map to a stock TestController driver are
+        excluded rather than guessed at, and reported under "excluded_devices".
         """
         try:
-            mappings = app.state.config.get_mappings()
+            cfg = app.state.config
+            mappings = cfg.get_mappings()
+            settings = cfg.get_settings()
             ctrl_id_base = controller_id.strip().upper() if controller_id.strip() else "A"
             gw_host = host.strip() if host.strip() else "127.0.0.1"
 
-            gpib_lines = []
-            load_lines = [
-                "ScanSerialPorts:1",
-                "ExcludedSerialPorts:"
-            ]
-            
-            mapped_devices = []
-            sorted_slots = sorted([int(k) for k in mappings.keys() if int(k) != 0])
-            
-            def map_to_testcontroller_driver(idn: str, visa_address: str, description: str) -> str:
-                combined = f"{idn} {description} {visa_address}".upper()
-                
-                if "34401A" in combined:
-                    return "Agilent 34401A"
-                elif "34411A" in combined or "34410A" in combined:
-                    return "Agilent 34411A"
-                elif "34461A" in combined or "34460A" in combined or "34465A" in combined:
-                    return "Keysight 34461A"
-                elif "TDS 2024" in combined or "TDS" in combined or "TEKTRONIX" in combined:
-                    return "Tektronix TDS2024"
-                elif "2000" in combined:
-                    return "Keithley 2000"
-                elif "2001" in combined:
-                    return "Keithley 2001M"
-                elif "2002" in combined:
-                    return "Keithley 2002"
-                elif "2010" in combined:
-                    return "Keithley 2010"
-                elif "PM6685" in combined or "PM6690" in combined or "PM66" in combined:
-                    return "Fluke PM6690"
-                elif "33250A" in combined:
-                    return "Agilent 33250A"
-                elif "E363" in combined:
-                    return "HP E3633A"
-                elif "SDM30" in combined or "SDM3065" in combined:
-                    return "Siglent SDM3065X"
-                else:
-                    clean_name = description if description else (idn.split(",")[1].strip() if "," in idn else idn)
-                    return clean_name if clean_name else "Generic GPIB Device"
+            valid_drivers, driver_source = _load_tc_driver_names()
+            force_addr = bool(settings.get("tc_force_addr", True))
+            if use_ports is None:
+                use_ports = bool(settings.get("multi_port_enabled", False))
 
+            scan_serial = "1" if settings.get("tc_scan_serial_ports", False) else "0"
+            excluded = (settings.get("tc_excluded_serial_ports", "") or "").strip()
+
+            gpib_lines = []
+            load_lines = [f"ScanSerialPorts:{scan_serial}", f"ExcludedSerialPorts:{excluded}"]
+
+            mapped_devices, excluded_devices = [], []
+            sorted_slots = sorted([int(k) for k in mappings.keys() if int(k) != 0])
             alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-            for idx, slot_int in enumerate(sorted_slots):
-                slot_str = str(slot_int)
-                m = mappings[slot_str]
+            ctrl_index = 0
+            for slot_int in sorted_slots:
+                m = mappings[str(slot_int)]
                 visa_addr = m.get("visa_address", "")
                 idn = m.get("idn_pattern", "")
                 desc = m.get("description", "")
-                
+
+                driver = _map_to_testcontroller_driver(idn, visa_addr, desc)
+                if driver is None or driver not in valid_drivers:
+                    excluded_devices.append({
+                        "address": slot_int,
+                        "visa_address": visa_addr,
+                        "description": desc,
+                        "idn": idn,
+                        "reason": ("No matching TestController driver" if driver is None
+                                   else f"Driver '{driver}' not present in {driver_source}")
+                    })
+                    continue
+
                 if separate_adapters:
-                    device_ctrl_id = alphabet[idx % len(alphabet)]
-                    gpib_lines.append(f"PrologixEthernet|id:{device_ctrl_id}|address:{gw_host}|baudrate:|settings:|")
+                    device_ctrl_id = alphabet[ctrl_index % len(alphabet)]
+                    ctrl_index += 1
                 else:
                     device_ctrl_id = ctrl_id_base
 
-                driver = map_to_testcontroller_driver(idn, visa_addr, desc)
-                load_lines.append(f"Device:{driver}|PortType:GPIB|Address:{device_ctrl_id}:{slot_int}|Baudrate:9600|Enabled:1")
+                # The settings: field carries a port override and any ++ commands to send
+                # at init. init() runs on every (re)connect, so ++addr here is what makes
+                # TestController re-address after a menu Reconnect.
+                parts = []
+                dedicated_port = m.get("listen_port") if use_ports else None
+                if dedicated_port:
+                    parts.append(f"port:{int(dedicated_port)}")
+                if force_addr:
+                    parts.append(f"++addr {slot_int}")
+                settings_field = ";".join(parts)
+
+                if separate_adapters:
+                    gpib_lines.append(
+                        f"PrologixEthernet|id:{device_ctrl_id}|address:{gw_host}|baudrate:|settings:{settings_field}|")
+
+                load_lines.append(
+                    f"Device:{driver}|PortType:GPIB|Address:{device_ctrl_id}:{slot_int}|Baudrate:9600|Enabled:1")
                 mapped_devices.append({
                     "address": slot_int,
                     "controller_id": device_ctrl_id,
                     "driver": driver,
                     "visa_address": visa_addr,
                     "idn": idn,
-                    "description": desc
+                    "description": desc,
+                    "listen_port": dedicated_port
                 })
 
             if not separate_adapters or not gpib_lines:
+                # One controller serving every slot cannot carry a per-device ++addr,
+                # so its settings field stays empty.
                 gpib_text = f"PrologixEthernet|id:{ctrl_id_base}|address:{gw_host}|baudrate:|settings:|\n"
             else:
                 gpib_text = "\n".join(gpib_lines) + "\n"
-
-            settings_load = "\n".join(load_lines) + "\n"
 
             return {
                 "status": "success",
                 "controller_id": ctrl_id_base,
                 "host": gw_host,
                 "separate_adapters": separate_adapters,
+                "force_addr": force_addr,
+                "use_ports": use_ports,
+                "driver_source": driver_source,
+                "scan_serial_ports": scan_serial == "1",
+                "excluded_serial_ports": excluded,
                 "settingsGPIB": gpib_text,
-                "settingsLoad": settings_load,
-                "mapped_devices": mapped_devices
+                "settingsLoad": "\n".join(load_lines) + "\n",
+                "mapped_devices": mapped_devices,
+                "excluded_devices": excluded_devices
             }
         except Exception as e:
             logger.error("WEB_API", f"TestController config generation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+    # 4c. Host serial port discovery (for the TestController exclusion list)
+    @api.get("/host/serial_ports")
+    def list_host_serial_ports():
+        """Lists the host's serial ports so the user can choose which TestController skips."""
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return {"status": "unavailable", "detail": "pyserial is not installed", "ports": []}
+
+        excluded_raw = (app.state.config.get_setting("tc_excluded_serial_ports", "") or "")
+        excluded = {p.strip().upper() for p in excluded_raw.split(",") if p.strip()}
+        ports = []
+        for p in list_ports.comports():
+            ports.append({
+                "device": p.device,
+                "description": p.description or "",
+                "hwid": p.hwid or "",
+                "excluded": p.device.upper() in excluded
+            })
+        ports.sort(key=lambda x: x["device"])
+        return {"status": "success", "ports": ports,
+                "scan_enabled": bool(app.state.config.get_setting("tc_scan_serial_ports", False))}
+
+    # 4d. Dedicated listener port management
+    @api.get("/ports")
+    def get_listener_ports():
+        """Reports dedicated per-slot listener ports: configured vs actually bound."""
+        srv = app.state.socket_server
+        return {
+            "status": "success",
+            "multi_port_enabled": bool(app.state.config.get_setting("multi_port_enabled", False)),
+            "multi_port_base": app.state.config.get_setting("multi_port_base", 1235),
+            "configured": {str(port): slot for port, slot in app.state.config.get_port_bindings().items()},
+            "bound": {str(port): slot for port, slot in (srv.port_slot_map.items() if srv else [])},
+            "control_port": 1234
+        }
+
+    @api.post("/ports/sync")
+    async def sync_listener_ports():
+        """Applies the configured dedicated ports to the running socket server."""
+        srv = app.state.socket_server
+        if not srv:
+            raise HTTPException(status_code=503, detail="Socket server is not available")
+        result = await srv.sync_port_listeners()
+        if result["failed"]:
+            logger.warning("WEB_API", f"Some dedicated ports could not be bound: {result['failed']}")
+        return {"status": "success", **result}
 
     # 5. Interactive Console Terminal
     @api.post("/send_command")

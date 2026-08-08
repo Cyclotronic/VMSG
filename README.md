@@ -124,8 +124,15 @@ Click **ADMIN PANEL** in the top right of the dashboard to configure:
 
 ## 🔌 TestController Integration & Multi-Instrument Setup
 
-When integrating VMSG with **[TestController](https://lygte-info.dk/project/TestControllerIntro%20UK.html)**:
-* Assign each instrument its own **Prologix Ethernet Controller ID** (`A`, `B`, `C`, `D`, `E`) in TestController's `settingsGPIB.txt` pointing to `127.0.0.1:1234`.
-* This prevents TestController's internal Java single-socket lock contention on startup.
-* For detailed technical breakdown, diagnostic logs, and configuration examples, see **[`TESTCONTROLLER_NOTES.md`](file:///c:/Users/russg/Documents/AG/VMSG/TESTCONTROLLER_NOTES.md)**.
+Use **Export TestController Config** in the dashboard to generate `settingsGPIB.txt` and `settingsLoad.txt` from your live mappings, then drop both into TestController's `Settings` folder. The export is built so a cold start *and* a menu **Reconnect** both work:
+
+* **One Controller ID per instrument** (`A`, `B`, `C`, …). A single shared ID trips a startup defect in TestController that stops all but one device thread.
+* **`settings:++addr N` per controller.** TestController re-runs its interface init on every reconnect but does not re-send the address, so without this a Reconnect routes every device to the default slot. This field closes that gap with no changes to either program.
+* **Only known driver names are emitted.** An instrument that does not map to a stock TestController driver is *excluded* and reported, never guessed — TestController abandons every remaining device when it meets a name it cannot resolve.
+* **Serial scanning is off by default** (`ScanSerialPorts:0`), keeping TestController on VMSG's sockets. Turn it on and pick per-port exclusions under **Host Discovery & TestController** in the admin panel.
+
+### Optional: A Dedicated Port Per Instrument
+Off by default — everything runs on the single control port `1234`. When enabled (admin panel, the auto-assign dialog, or a per-slot field on any mapping tile), each mapped slot also listens on its own port and the export emits `settings:port:NNNN;++addr N`. A client arriving on a dedicated port is addressed to that slot automatically and never needs `++addr` at all, which makes reconnects correct regardless of client behaviour and works for a remote TestController host.
+
+For the full technical breakdown — decompiled root causes, diagnostic logs, and the defects worth reporting upstream — see **[`TESTCONTROLLER_NOTES.md`](TESTCONTROLLER_NOTES.md)**.
 

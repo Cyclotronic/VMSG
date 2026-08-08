@@ -24,6 +24,14 @@ DEFAULT_CONFIG = {
         "unmapped_behavior": "message",
         "auto_heal_usb": True,
         "scan_serial_ports": False,
+        # TestController export controls
+        "tc_scan_serial_ports": False,
+        "tc_excluded_serial_ports": "",
+        "tc_force_addr": True,
+        "tc_devices_path": "",
+        # Dedicated per-device listener ports (single-port mode is the default)
+        "multi_port_enabled": False,
+        "multi_port_base": 1235,
         # Default logging controller settings
         "log_level": "WARN",
         "enable_stdout": False,
@@ -165,6 +173,13 @@ class ConfigManager:
                         val = int(v)
                         if 0 <= val <= 255:
                             self.config["settings"][k] = val
+                    elif k in ["tc_scan_serial_ports", "tc_force_addr", "multi_port_enabled"]:
+                        self.config["settings"][k] = True if v else False
+                    elif k == "multi_port_base":
+                        val = int(v)
+                        # Stay clear of the well-known range and of the control port itself
+                        if 1025 <= val <= 65000 and val != 1234:
+                            self.config["settings"][k] = val
                     else:
                         self.config["settings"][k] = v
 
@@ -190,18 +205,55 @@ class ConfigManager:
             m = self.config["mappings"].get(addr_str)
             return copy.deepcopy(m) if m else None
 
-    def set_mapping(self, address: int, visa_address: str, idn_pattern: str = "", description: str = "") -> None:
-        """Sets or updates mapping for a virtual address (0-30) and persists change."""
+    def set_mapping(self, address: int, visa_address: str, idn_pattern: str = "", description: str = "",
+                    listen_port: Optional[int] = None) -> None:
+        """Sets or updates mapping for a virtual address (0-30) and persists change.
+
+        listen_port, when set, gives this slot its own TCP listener so a client that
+        connects there is addressed to this slot without needing ++addr.
+        """
         if not (0 <= address <= 30):
             raise ValueError("Virtual address must be between 0 and 30")
+        if listen_port is not None:
+            listen_port = int(listen_port)
+            if not (1025 <= listen_port <= 65000) or listen_port == 1234:
+                raise ValueError("Dedicated listener port must be 1025-65000 and not 1234")
         with self.lock:
             addr_str = str(address)
-            self.config["mappings"][addr_str] = {
+            for other, m in self.config["mappings"].items():
+                if other != addr_str and listen_port is not None and m.get("listen_port") == listen_port:
+                    raise ValueError(f"Port {listen_port} is already assigned to slot {other}")
+            entry = {
                 "visa_address": visa_address,
                 "idn_pattern": idn_pattern,
                 "description": description
             }
+            if listen_port is not None:
+                entry["listen_port"] = listen_port
+            self.config["mappings"][addr_str] = entry
             self._save_config_unlocked()
+
+    def get_port_bindings(self) -> Dict[int, int]:
+        """Returns {listen_port: slot} for every mapping that has a dedicated port."""
+        with self.lock:
+            if not self.config["settings"].get("multi_port_enabled"):
+                return {}
+            bindings = {}
+            for slot_str, m in self.config["mappings"].items():
+                port = m.get("listen_port")
+                if port:
+                    bindings[int(port)] = int(slot_str)
+            return bindings
+
+    def next_free_port(self) -> int:
+        """Lowest unused port at or above the configured base."""
+        with self.lock:
+            base = int(self.config["settings"].get("multi_port_base", 1235))
+            used = {int(m["listen_port"]) for m in self.config["mappings"].values() if m.get("listen_port")}
+        port = base
+        while port in used or port == 1234:
+            port += 1
+        return port
 
     def delete_mapping(self, address: int) -> bool:
         """Deletes mapping for a virtual address. Returns True if found and deleted."""
