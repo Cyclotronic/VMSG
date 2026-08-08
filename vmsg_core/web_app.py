@@ -307,10 +307,11 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                         desc = desc[:25]
                         
                         # Set mapping
+                        fingerprint = app.state.visa.create_fingerprint(idn)
                         app.state.config.set_mapping(
                             address=slot_idx,
                             visa_address=v_addr,
-                            idn_pattern=desc,
+                            idn_pattern=fingerprint,
                             description=desc
                         )
                         assigned_actions.append({

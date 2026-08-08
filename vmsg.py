@@ -56,6 +56,16 @@ async def main():
     )
     uvicorn_server = uvicorn.Server(uvicorn_config)
 
+    # Print startup banner directly to console
+    print("================================================================================")
+    print("  VISA Mapping TCP/IP Socket Gateway (VMSG) v1.0.0")
+    print(f"  Prologix Control Socket : tcp://0.0.0.0:1234")
+    print(f"  Web Dashboard & REST API : http://localhost:8080")
+    print(f"  Config File Path         : {config.filepath}")
+    backend_type = "Pure-Python (@py)" if (visa.rm and "@py" in str(type(visa.rm))) else ("NI-VISA System" if visa.rm else "None (Mock Only)")
+    print(f"  VISA Backend Loaded      : {backend_type}")
+    print("================================================================================\n")
+
     logger.info("MAIN", "Starting servers...")
     
     # Run socket server and web server concurrently

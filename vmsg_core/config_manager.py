@@ -44,9 +44,15 @@ class ConfigManager:
     def load_config(self) -> None:
         """Loads configuration from JSON file. Creates default configuration if file does not exist."""
         with self.lock:
-            if os.path.exists(self.filepath):
+            target_path = self.filepath
+            if not os.path.exists(target_path):
+                example_path = os.path.join(os.path.dirname(self.filepath), "mappings.example.json")
+                if os.path.exists(example_path):
+                    target_path = example_path
+
+            if os.path.exists(target_path):
                 try:
-                    with open(self.filepath, "r") as f:
+                    with open(target_path, "r") as f:
                         loaded = json.load(f)
                         if "settings" not in loaded:
                             loaded["settings"] = copy.deepcopy(DEFAULT_CONFIG["settings"])
@@ -62,13 +68,13 @@ class ConfigManager:
                 except Exception as e:
                     print(f"[ConfigManager] Error loading config, resetting to default: {e}")
                     self.config = copy.deepcopy(DEFAULT_CONFIG)
-                    self._save_config_unlocked()
             else:
                 self.config = copy.deepcopy(DEFAULT_CONFIG)
-                self._save_config_unlocked()
-        
-        # Ensure savecfg is initialized to 1 for VMSG operations
-        self.config["settings"]["savecfg"] = 1
+                
+            self._save_config_unlocked()
+            # Ensure savecfg is initialized to 1 for VMSG operations
+            self.config["settings"]["savecfg"] = 1
+
         # Propagate config settings to global logger
         logger.configure(self.config["settings"])
 
