@@ -149,6 +149,14 @@ class VisaManager:
         if not visa_address:
             raise ValueError("Empty VISA address")
 
+        if not visa_address.upper().startswith("MOCK::"):
+            with self.unresponsive_lock:
+                now = time.time()
+                if visa_address in self.unresponsive_cache:
+                    last_fail = self.unresponsive_cache[visa_address]
+                    if now - last_fail < 120.0:
+                        raise RuntimeError(f"Resource {visa_address} is recently unresponsive (cooldown active).")
+
         while True:
             with self.lock:
                 if visa_address not in self.resource_locks:
@@ -247,9 +255,11 @@ class VisaManager:
                 logger.info("VISAMANAGER", f"Purged resource from cache: {addr}")
             self.resource_cache.clear()
 
-    def is_scannable_resource(self, addr: str) -> bool:
-        """Helper to filter out raw board interfaces, secondary GPIB addresses, and non-instrument endpoints."""
+    def is_scannable_resource(self, addr: str, scan_serial: bool = False) -> bool:
+        """Helper to filter out raw board interfaces, serial COM ports (unless enabled), and secondary GPIB addresses."""
         u = addr.upper()
+        if not scan_serial and (u.startswith("ASRL") or "::ASRL" in u):
+            return False
         if u.endswith("::INTFC") or u.endswith("::RAW"):
             return False
         if u.startswith("GPIB") and len(addr.split("::")) > 3:
@@ -305,7 +315,7 @@ class VisaManager:
                         self.unresponsive_cache[visa_address] = time.time()
                 return None
 
-    def scan_all_hardware(self) -> List[Dict[str, str]]:
+    def scan_all_hardware(self, scan_serial: bool = False) -> List[Dict[str, str]]:
         """
         Scans all physical VISA ports + any Mock slots, queries *IDN?, and returns results.
         Runs securely without causing blocks.
@@ -314,7 +324,7 @@ class VisaManager:
         
         physical_resources = self.list_physical_resources()
         for r in physical_resources:
-            if not self.is_scannable_resource(r):
+            if not self.is_scannable_resource(r, scan_serial=scan_serial):
                 continue
 
             idn = self.query_idn(r, timeout_ms=300, force=False)

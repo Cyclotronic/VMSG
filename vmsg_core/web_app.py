@@ -228,7 +228,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         """Scans all connected instruments and queries *IDN? responses."""
         try:
             logger.info("WEB_API", "Triggering PyVISA hardware scanning...")
-            devices = app.state.visa.scan_all_hardware()
+            scan_serial = app.state.config.get_setting("scan_serial_ports", False)
+            devices = app.state.visa.scan_all_hardware(scan_serial=scan_serial)
             logger.info("WEB_API", f"Hardware scan finished. Discovered {len(devices)} targets.")
             return devices
         except Exception as e:
@@ -276,8 +277,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     def auto_assign_devices(data: AutoAssignModel):
         """
         Scans all online hardware/mock devices and auto-assigns them to 
-        available virtual GPIB addresses (0-30). Does not overwrite 
-        pre-existing mappings unless force_overwrite is set to True.
+        available virtual GPIB addresses (0-30). Preserves offline device 
+        mappings and fingerprints even when force_overwrite is True.
         """
         try:
             force_overwrite = data.force_overwrite
@@ -285,7 +286,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             logger.info("WEB_API", f"Auto-assignment triggered. Force overwrite: {force_overwrite}, Include Mocks: {include_mocks}")
             
             # Scan connected hardware
-            scanned = app.state.visa.scan_all_hardware()
+            scan_serial = app.state.config.get_setting("scan_serial_ports", False)
+            scanned = app.state.visa.scan_all_hardware(scan_serial=scan_serial)
             online_devices = [d for d in scanned if d.get("status") == "online" and d.get("idn") and "Unknown" not in d.get("idn", "")]
             
             if not include_mocks:
@@ -299,13 +301,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     "mappings": app.state.config.get_mappings()
                 }
 
-            if force_overwrite:
-                app.state.config.clear_all_mappings()
-                current_mappings = {}
-                mapped_visa_addrs = {}
-            else:
-                current_mappings = app.state.config.get_mappings()
-                mapped_visa_addrs = {m["visa_address"]: addr for addr, m in current_mappings.items()}
+            current_mappings = app.state.config.get_mappings()
+            mapped_visa_addrs = {m["visa_address"]: addr for addr, m in current_mappings.items()}
             
             assigned_actions = []
             
@@ -313,11 +310,37 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 v_addr = dev["visa_address"]
                 idn = dev["idn"]
                 
-                # Skip if already mapped unless forcing overwrite
+                # Skip if already mapped unless force_overwrite is True
                 if v_addr in mapped_visa_addrs and not force_overwrite:
                     continue
                 
-                # Find the lowest available virtual slot (1-30)
+                desc = idn.split(",")[1].strip() if len(idn.split(",")) > 1 else idn.split(",")[0].strip()
+                desc = desc[:25]
+                fingerprint = app.state.visa.create_fingerprint(idn)
+
+                # If force_overwrite is True and device is already mapped, update its slot in-place
+                if v_addr in mapped_visa_addrs and force_overwrite:
+                    assigned_slot = int(mapped_visa_addrs[v_addr])
+                    app.state.config.set_mapping(
+                        address=assigned_slot,
+                        visa_address=v_addr,
+                        idn_pattern=fingerprint,
+                        description=desc
+                    )
+                    assigned_actions.append({
+                        "virtual_address": assigned_slot,
+                        "visa_address": v_addr,
+                        "description": desc,
+                        "overwritten": True
+                    })
+                    current_mappings[str(assigned_slot)] = {
+                        "visa_address": v_addr,
+                        "idn_pattern": fingerprint,
+                        "description": desc
+                    }
+                    continue
+
+                # Otherwise find lowest available virtual slot (1-30)
                 assigned_slot = None
                 for candidate in range(1, 31):
                     cand_str = str(candidate)
@@ -330,10 +353,6 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     break
                     
                 cand_str = str(assigned_slot)
-                desc = idn.split(",")[1].strip() if len(idn.split(",")) > 1 else idn.split(",")[0].strip()
-                desc = desc[:25]
-                fingerprint = app.state.visa.create_fingerprint(idn)
-                
                 app.state.config.set_mapping(
                     address=assigned_slot,
                     visa_address=v_addr,
@@ -345,7 +364,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     "virtual_address": assigned_slot,
                     "visa_address": v_addr,
                     "description": desc,
-                    "overwritten": force_overwrite
+                    "overwritten": False
                 })
                 
                 current_mappings[cand_str] = {

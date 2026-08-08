@@ -58,5 +58,11 @@ Device:Keithley 2010|PortType:GPIB|Address:E:5|Baudrate:9600|Enabled:1
 
 ---
 
+## 📌 Address Syntax Limitation Note
+> **Note**: TestController's `PrologixEthernet` `address:` field strictly parses IP hostnames/addresses (e.g. `127.0.0.1` or `192.168.1.10`) and does **not** accept `host:port` suffixes (e.g. `127.0.0.1:1235`). Dedicated per-port listening schemes are therefore incompatible with TestController. All connections connect to standard port `1234` using per-device controller IDs (`A`, `B`, `C`...).
+
+---
+
 ## 📌 Status Note for TestController Developers
 > **Note**: Clarification has been requested from the TestController software developer regarding single-controller multi-threading lock behavior on startup. This behavior may be updated or refined in a future release of TestController. Until then, use per-device controller IDs (`A`, `B`, `C`...) for multi-instrument setups.
+

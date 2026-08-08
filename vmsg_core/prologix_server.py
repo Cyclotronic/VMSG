@@ -230,20 +230,23 @@ class PrologixSocketServer:
 
     async def process_command(self, line: str, client_addr: tuple) -> Optional[str]:
         """
-        Parses and executes a command received from a socket client.
+        Parses and executes a command received from a socket client safely.
         If command is a Prologix command (starts with ++), handles it.
         Otherwise, routes to the active GPIB instrument.
         """
         logger.info("TRAFFIC_IN", f"[{client_addr[0]}:{client_addr[1]}] -> {line}")
-        
-        if line.startswith("++"):
-            parts = line[2:].strip().split(None, 1)
-            cmd = parts[0].lower()
-            arg = parts[1].strip() if len(parts) > 1 else None
-            
-            return await self.execute_prologix_cmd(cmd, arg, client_addr)
-        else:
-            return await self.route_instrument_cmd(line, client_addr)
+        try:
+            if line.startswith("++"):
+                parts = line[2:].strip().split(None, 1)
+                cmd = parts[0].lower()
+                arg = parts[1].strip() if len(parts) > 1 else None
+                return await self.execute_prologix_cmd(cmd, arg, client_addr)
+            else:
+                return await self.route_instrument_cmd(line, client_addr)
+        except Exception as e:
+            logger.error("SOCKET_SERVER", f"Error executing command '{line}' from {client_addr}: {e}", exc_info=True)
+            auto_mode = 1 if int(self.get_client_setting(client_addr, "auto", 0)) == 1 else 0
+            return self._empty_response(client_addr) if auto_mode == 1 else None
 
     async def execute_prologix_cmd(self, cmd: str, arg: Optional[str], client_addr: tuple) -> Optional[str]:
         """Executes a parsed Prologix command and returns output (terminated with CR+LF)."""
@@ -511,7 +514,11 @@ class PrologixSocketServer:
         if not visa_addr:
             return self._empty_response(client_addr) if auto_mode == 1 else None
 
-        await self.acquire_lease(visa_addr, client_addr, read_tmo_ms)
+        try:
+            await self.acquire_lease(visa_addr, client_addr, read_tmo_ms)
+        except asyncio.TimeoutError:
+            logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Lease contention timeout on {visa_addr}; treating as bus timeout.")
+            return self._empty_response(client_addr) if auto_mode == 1 else None
 
         try:
             res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
@@ -604,6 +611,9 @@ class PrologixSocketServer:
         try:
             await self.acquire_lease(visa_addr, client_addr, read_tmo_ms)
             res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
+        except asyncio.TimeoutError:
+            logger.warning("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Lease contention timeout on {visa_addr}; treating as bus timeout.")
+            return self._empty_response(client_addr)
         except Exception as e:
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Connection failed to {visa_addr}: {e}")
             await self.release_lease(visa_addr, client_addr)

@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
         "savecfg": 1,
         "unmapped_behavior": "message",
         "auto_heal_usb": True,
+        "scan_serial_ports": False,
         # Default logging controller settings
         "log_level": "WARN",
         "enable_stdout": False,
