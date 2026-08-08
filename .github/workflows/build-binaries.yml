@@ -1,0 +1,91 @@
+name: Build and Release VMSG Binaries
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: vmsg-windows
+            asset_name: vmsg-windows-amd64.exe
+            executable: dist/vmsg.exe
+          - os: ubuntu-latest
+            artifact_name: vmsg-linux
+            asset_name: vmsg-linux-amd64
+            executable: dist/vmsg
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run Integration Tests
+        shell: bash
+        run: |
+          python vmsg.py &
+          SERVER_PID=$!
+          sleep 3
+          python test_emulator.py
+          kill $SERVER_PID || true
+
+      - name: Compile Standalone Binary
+        run: python build_binary.py
+
+      - name: Prepare Binary Asset
+        shell: bash
+        run: |
+          mkdir -p bin_out
+          cp ${{ matrix.executable }} bin_out/${{ matrix.asset_name }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: bin_out/${{ matrix.asset_name }}
+
+  release:
+    name: Publish Release Assets
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release_assets/vmsg-windows/vmsg-windows-amd64.exe
+            release_assets/vmsg-linux/vmsg-linux-amd64
+          generate_release_notes: true

@@ -1,0 +1,2191 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VISA Mapping TCP/IP Socket Gateway (VMSG)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            bg: '#0B0F19',      // Midnight-Navy
+                            card: '#111827',    // Slate 900
+                            border: '#1E293B',  // Slate 800
+                            teal: '#14B8A6',    // Teal 500
+                            emerald: '#10B981', // Emerald 500
+                            amber: '#F59E0B',   // Amber 500
+                            indigo: '#6366F1',  // Indigo 500
+                            rose: '#F43F5E'     // Rose 500
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                        title: ['Outfit', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Glassmorphism custom classes */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+            color: #1e293b;
+            transition: background 0.3s ease, border 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .dark .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: none;
+            color: #f1f5f9;
+        }
+        .glowing-border-teal {
+            box-shadow: 0 0 15px -3px rgba(20, 184, 166, 0.3);
+        }
+        .glowing-border-emerald {
+            box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.3);
+        }
+        .glowing-border-indigo {
+            box-shadow: 0 0 15px -3px rgba(99, 102, 241, 0.3);
+        }
+        /* Custom scrollbar for logs and console */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(51, 65, 85, 0.8);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(20, 184, 166, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-[#f4f6f9] dark:bg-cyber-bg text-slate-800 dark:text-slate-100 font-sans min-h-screen antialiased flex flex-col selection:bg-cyber-teal selection:text-slate-900 transition-colors duration-300">
+
+    <!-- Glowing Top Accent Line -->
+    <div class="h-1 w-full bg-gradient-to-r from-cyber-indigo via-cyber-teal to-cyber-emerald shadow-[0_2px_20px_rgba(20,184,166,0.5)]"></div>
+
+    <!-- Admin Drawer Backdrop Overlay -->
+    <div id="admin-drawer-overlay" class="fixed inset-0 bg-black/70 backdrop-blur-md z-40 hidden opacity-0 transition-opacity duration-300 ease-in-out"></div>
+
+    <!-- Sliding Admin Panel Drawer -->
+    <div id="admin-drawer" class="fixed inset-y-0 left-0 w-[420px] max-w-[95vw] bg-slate-950/98 backdrop-blur-xl border-r border-white/10 z-50 transform -translate-x-full transition-transform duration-300 ease-in-out shadow-2xl flex flex-col text-slate-100">
+        <!-- Drawer Header -->
+        <div class="flex items-center justify-between p-5 border-b border-white/5 bg-slate-900/50 shrink-0">
+            <div class="flex items-center space-x-2 text-indigo-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+                <span class="font-title font-bold tracking-wider text-sm uppercase text-slate-200">Admin Settings Panel</span>
+            </div>
+            <button id="btn-close-admin" class="text-slate-400 hover:text-slate-100 transition p-1.5 hover:bg-white/5 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- Drawer Scrollable Content -->
+        <div class="flex-grow overflow-y-auto p-5 space-y-6 scrollbar-thin">
+            <!-- System Gateway Controls Widget -->
+            <section class="bg-slate-900/80 border border-white/10 rounded-2xl p-4 shadow-xl flex items-center justify-between glowing-border-amber">
+                <div class="flex items-center space-x-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <div>
+                        <h2 class="font-title font-bold text-xs uppercase tracking-wider text-slate-200">Gateway Controls</h2>
+                        <p class="text-[10px] text-slate-400 font-mono">Service Power & Restart Operations</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="btn-admin-restart" onclick="triggerGatewayRestart()" title="Restart Gateway Server" class="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-400 text-amber-400 hover:text-amber-300 rounded-xl transition duration-150 text-xs font-bold font-title tracking-wider flex items-center space-x-1 active:scale-[0.98]">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 11H18m0 0a1 1 0 100 2h3.24a1 1 0 00.99-.82l.48-3a1 1 0 10-1.98-.32L21 11h-3z" />
+                        </svg>
+                        <span>RESTART</span>
+                    </button>
+                    <button id="btn-admin-stop" onclick="triggerGatewayStop()" title="Stop Gateway Server" class="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-400 text-rose-400 hover:text-rose-300 rounded-xl transition duration-150 text-xs font-bold font-title tracking-wider flex items-center space-x-1 active:scale-[0.98]">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        <span>STOP</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Prologix Gateway Settings Form -->
+            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col">
+                <div class="flex flex-col mb-4 border-b border-white/5 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0" />
+                        </svg>
+                        <h2 class="font-title font-semibold tracking-wide text-slate-200">Global Prologix Controller Parameters</h2>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">Global settings governing Prologix command behavior across socket transactions.</p>
+                </div>
+
+                <form id="settings-form" class="space-y-4">
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Read-After-Write <span class="text-cyber-indigo font-bold ml-1">++auto</span></label>
+                            <select id="set-auto" name="auto" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                                <option value="1">Enabled (1)</option>
+                                <option value="0">Disabled (0)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Mode <span class="text-cyber-teal font-bold ml-1">++mode</span></label>
+                            <select id="set-mode" name="mode" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                                <option value="1">Controller (1)</option>
+                                <option value="0">Device (0)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">EOS Term <span class="text-cyber-emerald font-bold ml-1">++eos</span></label>
+                            <select id="set-eos" name="eos" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
+                                <option value="0">CR+LF (0)</option>
+                                <option value="1">CR (1)</option>
+                                <option value="2">LF (2)</option>
+                                <option value="3">None (3)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Assert EOI <span class="text-cyber-amber font-bold ml-1">++eoi</span></label>
+                            <select id="set-eoi" name="eoi" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
+                                <option value="1">Enabled (1)</option>
+                                <option value="0">Disabled (0)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Read Timeout (ms) <span class="text-cyber-rose font-bold ml-1">++read_tmo_ms</span></label>
+                        <input type="number" id="set-read-tmo-ms" name="read_tmo_ms" min="50" max="60000" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200 font-mono">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Unmapped Slot Behavior <span class="text-cyber-teal font-bold ml-1">++unmapped_behavior</span></label>
+                        <select id="set-unmapped-behavior" name="unmapped_behavior" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
+                            <option value="message">Friendly Warning Message</option>
+                            <option value="timeout">Simulate Typical Bus Timeout</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/5 pt-3 mt-1">
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">EOT Char <span class="text-cyber-teal font-bold ml-1">++eot_enable</span></label>
+                            <select id="set-eot-enable" name="eot_enable" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
+                                <option value="1">Enabled (1)</option>
+                                <option value="0">Disabled (0)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Char Code <span class="text-cyber-indigo font-bold ml-1">++eot_char</span></label>
+                            <input type="number" id="set-eot-char" name="eot_char" min="0" max="255" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200 font-mono">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3 mt-1 text-xs">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Auto-Fix USB Port Shifts</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Auto-heal moved ports on startup & scan (<code class="text-cyber-teal font-mono">auto_heal_usb</code>)</p>
+                        </div>
+                        <input type="checkbox" id="set-auto-heal-usb" name="auto_heal_usb" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <button type="submit" class="w-full bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-sm font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 hover:shadow-cyber-teal/20 active:scale-[0.98] transition duration-150 mt-2">
+                        Apply & Save Parameters
+                    </button>
+                </form>
+            </section>
+
+            <!-- Configuration Backup & Restore Widget -->
+            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
+                <div class="flex items-center space-x-2 mb-4 border-b border-white/5 pb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    </svg>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-200">Backup & Restore</h2>
+                </div>
+
+                <p class="text-xs text-slate-400 mb-4 leading-relaxed font-sans">
+                    Export your current Prologix settings and virtual GPIB mapping rules to a portable file, or upload a backup to restore configurations.
+                </p>
+
+                <div class="space-y-3">
+                    <button id="btn-download-backup" class="w-full bg-slate-800 hover:bg-slate-700 border border-cyber-border hover:border-cyber-teal text-slate-200 hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 flex items-center justify-center space-x-2 active:scale-[0.98]">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>Download JSON Backup</span>
+                    </button>
+
+                    <button id="btn-trigger-upload" class="w-full bg-cyber-teal/10 hover:bg-cyber-teal/20 border border-cyber-teal/30 hover:border-cyber-teal text-cyber-teal rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 flex items-center justify-center space-x-2 active:scale-[0.98]">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        <span>Upload JSON Backup</span>
+                    </button>
+                    <input type="file" id="backup-file-input" accept=".json" class="hidden">
+                </div>
+            </section>
+
+            <!-- Logging & Verbosity Widget -->
+            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-indigo">
+                <div class="flex items-center space-x-2 mb-4 border-b border-white/5 pb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-200">Logging & Verbosity</h2>
+                </div>
+
+                <form id="logging-form" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Log Verbosity Level</label>
+                        <select id="set-log-level" name="log_level" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-indigo focus:ring-1 focus:ring-cyber-indigo rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                            <option value="DEBUG">DEBUG (All logs, diagnostic)</option>
+                            <option value="INFO">INFO (Default operational events)</option>
+                            <option value="WARN">WARN (Warnings and errors only)</option>
+                            <option value="ERROR">ERROR (Severe crashes/failures only)</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-white/5 pt-3">
+                        <div class="flex flex-col pr-2">
+                            <span class="text-xs font-semibold text-slate-200">Terminal Stdout Logging</span>
+                            <span class="text-[10px] text-slate-400 leading-normal">Write log lines to terminal console (optionally enabled, disabled by default for silent Windows operation)</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer select-none">
+                            <input type="checkbox" id="set-enable-stdout" name="enable_stdout" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-800 rounded-full peer peer-focus:ring-1 peer-focus:ring-cyber-indigo peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-indigo peer-checked:after:bg-white"></div>
+                        </label>
+                    </div>
+
+                    <div class="border-t border-white/5 pt-3 space-y-2.5">
+                        <span class="block text-xs font-mono font-medium text-slate-400 uppercase tracking-wider">Logged Categories</span>
+                        
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-traffic" name="log_category_traffic" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                            <span>Client Socket Traffic (TRAFFIC_IN/OUT)</span>
+                        </label>
+                        
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-visa" name="log_category_visa" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                            <span>VISA Interactions (WRITE/READ/SCAN)</span>
+                        </label>
+                        
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-system" name="log_category_system" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                            <span>Main loop & System Events (MAIN/API)</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 border border-cyber-border hover:border-cyber-indigo text-slate-300 hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 active:scale-[0.98]">
+                        Apply Logging Filters
+                    </button>
+                </form>
+            </section>
+
+
+
+
+        </div>
+    </div>
+
+    <!-- Navigation Bar -->
+    <header class="glass-panel sticky top-0 z-40 px-6 py-4 flex items-center justify-between border-b border-slate-200/50 dark:border-white/5 shadow-lg">
+        <div class="flex items-center space-x-3">
+            <!-- Icon -->
+            <div class="bg-gradient-to-tr from-cyber-indigo to-cyber-teal p-2.5 rounded-xl shadow-lg shadow-cyber-teal/20 animate-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="font-title text-xl font-bold tracking-wide text-slate-800 dark:bg-gradient-to-r dark:from-white dark:via-slate-100 dark:to-cyber-teal dark:bg-clip-text dark:text-transparent">
+                    VISA Mapping TCP/IP Socket Gateway
+                </h1>
+                <p class="text-xs text-slate-500 dark:text-slate-400 font-medium font-mono uppercase tracking-wider">Virtual GPIB Bus Server (VMSG)</p>
+            </div>
+        </div>
+
+        <!-- Status Pill Box -->
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2 bg-slate-100 dark:bg-slate-900/60 border border-slate-300/50 dark:border-white/5 rounded-full px-4 py-1.5 shadow-inner">
+                <span class="relative flex h-2.5 w-2.5">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-teal opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyber-teal"></span>
+                </span>
+                <span id="socket-status" class="text-xs font-mono font-semibold text-cyber-teal dark:text-teal-400">Socket Port 1234: Active</span>
+            </div>
+            
+            <div id="client-badge" class="bg-cyber-indigo/10 dark:bg-cyber-indigo/20 border border-cyber-indigo/20 dark:border-cyber-indigo/30 rounded-full px-3 py-1.5 text-xs font-mono font-medium text-cyber-indigo dark:text-indigo-400 flex items-center space-x-1 shadow">
+                <span>Clients:</span>
+                <span id="client-count" class="font-bold">0</span>
+            </div>
+
+            <!-- System Controls -->
+            <div class="flex items-center space-x-3 border-l border-slate-200 dark:border-white/10 pl-4">
+                <!-- Theme Mode Toggle -->
+                <button id="btn-theme-toggle" title="Toggle Light/Dark Theme" class="px-3.5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-cyber-border hover:border-cyber-indigo text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl transition duration-150 flex items-center space-x-2 text-xs font-bold font-title tracking-wider active:scale-[0.98]">
+                    <!-- Sun Icon (visible in dark mode) -->
+                    <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-amber-400 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M14 12a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                    <!-- Moon Icon (visible in light mode) -->
+                    <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-indigo" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                    <span id="theme-toggle-text">LIGHT THEME</span>
+                </button>
+                <!-- VISA Hardware Overview Toggle -->
+                <button id="btn-open-visa-modal" title="Show All Detected VISA Hardware Instruments" class="px-3.5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-cyber-border hover:border-cyber-emerald text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl transition duration-150 flex items-center space-x-1.5 text-xs font-bold font-title tracking-wider active:scale-[0.98]">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-emerald" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <span>VISA INSTRUMENTS</span>
+                </button>
+                <!-- TestController Subtool Toggle -->
+                <button id="btn-open-tc" title="TestController Configuration Utility" class="px-3.5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-cyber-border hover:border-cyber-teal text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl transition duration-150 flex items-center space-x-1.5 text-xs font-bold font-title tracking-wider active:scale-[0.98]">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <span>TESTCONTROLLER UTILITY</span>
+                </button>
+                <!-- Admin Panel Drawer Toggle -->
+                <button id="btn-open-admin" title="Admin Settings Panel" class="px-3.5 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-cyber-border hover:border-cyber-indigo text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 rounded-xl transition duration-150 flex items-center space-x-1.5 text-xs font-bold font-title tracking-wider active:scale-[0.98]">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-indigo" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                    <span>ADMIN PANEL</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="flex-grow p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+
+        <!-- MAIN AREA: Virtual Patch-Panel & Logs/Console (Cols: 12) -->
+        <div class="lg:col-span-12 flex flex-col space-y-6">
+
+            <!-- First-Time Welcome Note Banner -->
+            <div id="welcome-banner" class="bg-indigo-50/90 dark:bg-slate-900/90 border border-indigo-200/80 dark:border-cyber-indigo/40 rounded-2xl p-5 shadow-lg flex items-start justify-between relative overflow-hidden transition-colors">
+                <div class="flex items-start space-x-3.5">
+                    <div class="p-2.5 bg-indigo-500/10 dark:bg-cyber-indigo/20 border border-indigo-300/50 dark:border-cyber-indigo/30 rounded-xl text-indigo-600 dark:text-cyber-indigo shrink-0 mt-0.5 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-xs font-title font-bold text-slate-900 dark:text-slate-100 tracking-wide uppercase flex items-center space-x-2">
+                            <span>Welcome to VISA Mapping Gateway (VMSG)!</span>
+                        </h3>
+                        <div class="mt-1.5 space-y-1.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-sans">
+                            <p>
+                                This tool emulates full <strong class="text-indigo-600 dark:text-cyber-teal font-semibold">Prologix GPIB-Ethernet commands</strong> (<code class="text-indigo-600 dark:text-cyber-teal font-mono font-bold">++ver</code>, <code class="text-indigo-600 dark:text-cyber-teal font-mono font-bold">++addr</code>, <code class="text-indigo-600 dark:text-cyber-teal font-mono font-bold">++auto</code>, <code class="text-indigo-600 dark:text-cyber-teal font-mono font-bold">++read</code>, <code class="text-indigo-600 dark:text-cyber-teal font-mono font-bold">++spoll</code>, etc.) and behaves like a physical Prologix Ethernet controller over TCP socket port <code class="text-indigo-700 dark:text-cyber-indigo font-mono font-bold">1234</code>.
+                            </p>
+                            <p>
+                                The only thing you need to do is map your VISA instruments to the virtual GPIB address tiles below. Click <button onclick="document.getElementById('btn-open-visa-modal').click()" class="text-emerald-700 dark:text-cyber-emerald hover:underline font-bold bg-emerald-500/10 dark:bg-cyber-emerald/10 px-2 py-0.5 rounded border border-emerald-300/50 dark:border-cyber-emerald/30">VISA INSTRUMENTS</button> in the top toolbar to discover, select, and auto-assign your hardware.
+                            </p>
+                            <p class="text-slate-500 dark:text-slate-400 text-[11px] pt-0.5">
+                                <span class="text-indigo-600 dark:text-cyber-teal font-bold">Feature Note:</span> Each instrument tile includes built-in interactive <strong class="text-slate-800 dark:text-slate-200">Test Consoles</strong> (<code class="text-indigo-600 dark:text-cyber-teal font-mono">&gt;_ CONSOLE</code>) and real-time protocol <strong class="text-slate-800 dark:text-slate-200">Snoop Streams</strong> (<code class="text-indigo-600 dark:text-cyber-teal font-mono">👁 SNOOP</code>).
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1.5 hover:bg-slate-200/60 dark:hover:bg-white/10 rounded-lg transition shrink-0 ml-3" title="Dismiss">✕</button>
+            </div>
+
+            <!-- Prologix Controller Active Configurations Dashboard -->
+            <div class="space-y-2.5">
+                <div class="flex items-center space-x-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-indigo animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span class="text-xs font-mono font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Prologix Controller Configured Parameters</span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <!-- Controller Mode card -->
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col justify-between border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/40 shadow-inner glowing-border-teal">
+                        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono uppercase tracking-wider">Controller Mode (++mode)</span>
+                        <span id="stat-mode" class="text-sm font-bold font-mono tracking-wide text-cyber-teal mt-2">--</span>
+                    </div>
+                    <!-- Auto-Read Mode card -->
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col justify-between border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/40 shadow-inner glowing-border-indigo">
+                        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono uppercase tracking-wider">Auto-Read (++auto)</span>
+                        <span id="stat-auto" class="text-sm font-bold font-mono tracking-wide text-cyber-indigo mt-2">--</span>
+                    </div>
+                    <!-- EOS Termination card -->
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col justify-between border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/40 shadow-inner glowing-border-emerald">
+                        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono uppercase tracking-wider">EOS Termination (++eos)</span>
+                        <span id="stat-eos" class="text-sm font-bold font-mono tracking-wide text-cyber-emerald mt-2">--</span>
+                    </div>
+                    <!-- Assert EOI card -->
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col justify-between border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/40 shadow-inner glowing-border-amber">
+                        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono uppercase tracking-wider">Assert EOI (++eoi)</span>
+                        <span id="stat-eoi" class="text-sm font-bold font-mono tracking-wide text-cyber-amber mt-2">--</span>
+                    </div>
+                    <!-- Read Timeout card -->
+                    <div class="glass-panel rounded-2xl p-4 flex flex-col justify-between border-slate-200/50 dark:border-white/5 bg-white/50 dark:bg-slate-900/40 shadow-inner glowing-border-rose">
+                        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold font-mono uppercase tracking-wider">Read Timeout (++read_tmo)</span>
+                        <span id="stat-read-tmo" class="text-sm font-bold font-mono tracking-wide text-cyber-rose mt-2">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Virtual Patch Panel Header -->
+            <section class="glass-panel rounded-3xl p-6 shadow-xl flex flex-col">
+                <div class="flex items-center justify-between mb-5 pb-4 border-b border-slate-200/50 dark:border-white/5">
+                    <div>
+                        <h2 class="font-title text-lg font-bold tracking-wide flex items-center space-x-2">
+                            <span class="text-cyber-teal">Virtual Patch-Panel</span>
+                            <span class="text-xs font-mono font-semibold px-2 py-0.5 bg-slate-100 dark:bg-slate-900 border border-slate-200/50 dark:border-white/5 text-slate-600 dark:text-slate-400 rounded-md">GPIB Bus Grid (0-30)</span>
+                        </h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                            Click on any slot to map it to a physical VISA instrument or a high-fidelity interactive emulator mock.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 31-Slot Grid -->
+                <div id="patch-panel-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
+                    <!-- Dynamic slots injected here -->
+                </div>
+            </section>
+
+            <!-- Console Terminal & Live Traffic Logs -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-6 flex-grow">
+                
+                <!-- Hidden Interactive Console for JS Compatibility -->
+                <div class="hidden">
+                    <span id="console-target">Slot: --</span>
+                    <div id="console-feed"></div>
+                    <form id="console-form">
+                        <input type="text" id="console-input">
+                    </form>
+                </div>
+
+                <!-- System Logs (Cols: 12) -->
+                <section class="glass-panel rounded-2xl p-5 shadow-xl md:col-span-12 flex flex-col h-[380px]">
+                    <div class="flex items-center justify-between border-b border-slate-200 dark:border-white/5 pb-3 mb-2.5">
+                        <h3 class="font-title font-semibold tracking-wide text-cyber-teal dark:text-teal-400 flex items-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                            <span>Real-Time Logs</span>
+                        </h3>
+                        <button id="btn-clear-logs" class="text-[10px] text-slate-500 hover:text-cyber-rose dark:text-slate-400 dark:hover:text-cyber-rose transition font-mono uppercase tracking-wider font-semibold">Clear</button>
+                    </div>
+
+                    <!-- Client-Side Log Stream Filters -->
+                    <div class="flex items-center space-x-4 mb-3 pb-2 border-b border-slate-200 dark:border-white/5 text-[10px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
+                        <span class="uppercase tracking-wider font-semibold text-slate-600 dark:text-slate-500">Filters:</span>
+                        <label class="flex items-center space-x-1.5 cursor-pointer text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="filter-log-sys" checked class="rounded border-slate-300 dark:border-cyber-border bg-slate-50 dark:bg-slate-900 text-cyber-teal focus:ring-0 w-3 h-3">
+                            <span>System</span>
+                        </label>
+                        <label class="flex items-center space-x-1.5 cursor-pointer text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="filter-log-visa" checked class="rounded border-slate-300 dark:border-cyber-border bg-slate-50 dark:bg-slate-900 text-cyber-teal focus:ring-0 w-3 h-3">
+                            <span>VISA</span>
+                        </label>
+                        <label class="flex items-center space-x-1.5 cursor-pointer text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="filter-log-traffic" class="rounded border-slate-300 dark:border-cyber-border bg-slate-50 dark:bg-slate-900 text-cyber-teal focus:ring-0 w-3 h-3">
+                            <span>Client Traffic</span>
+                        </label>
+                    </div>
+
+                    <div id="log-feed" class="flex-grow bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-white/5 rounded-xl p-3 overflow-y-auto font-mono text-[11px] leading-relaxed space-y-1.5 text-slate-800 dark:text-slate-100">
+                        <!-- Dynamic log items -->
+                    </div>
+                </section>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="mt-auto py-5 border-t border-white/5 glass-panel text-center text-xs text-slate-500">
+        VISA Mapping TCP/IP Socket Gateway (VMSG) v1.0 • Implementing Prologix-style controls over TCP Socket Connections (Port 1234)
+    </footer>
+
+    <!-- MODAL: Edit Slot Mapping -->
+    <div id="mapping-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+        <div class="glass-panel rounded-3xl p-6 w-full max-w-md shadow-2xl relative border border-slate-200 dark:border-white/10 glowing-border-teal">
+            <button id="modal-close" class="absolute top-4 right-4 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+
+            <h3 class="font-title text-lg font-bold mb-1 text-slate-800 dark:text-slate-100">Configure Virtual Address</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-5 font-mono">Virtual Slot Address: <span id="modal-addr-title" class="text-cyber-teal font-bold">--</span></p>
+
+            <form id="mapping-form" class="space-y-4">
+                <input type="hidden" id="modal-addr" name="address">
+                
+                <div>
+                    <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Discovered Devices &amp; Mocks (Dropdown)</label>
+                    <select id="modal-discovered-select" onchange="onDiscoveredSelectChanged(this)" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-200">
+                        <option value="">-- Choose a Discovered Device --</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">VISA Resource Address</label>
+                    <input type="text" id="modal-visa-address" required placeholder="e.g. GPIB0::7::INSTR or MOCK::DMM::INSTR" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-100 font-mono">
+                    <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Manually enter an address, or pick from the dropdown list above to auto-fill details.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Identity String (*IDN? fingerprint)</label>
+                    <input type="text" id="modal-idn-pattern" placeholder="e.g. HEWLETT-PACKARD,34401A" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-100 font-mono">
+                    <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Matches this substring against active VISA query responses on startup or healing to auto-recover physical ports if they switch.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Device Description</label>
+                    <input type="text" id="modal-description" placeholder="e.g. HP Multimeter Bench Top" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-100">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/5 pt-4 mt-2">
+                    <button type="button" id="modal-btn-delete" class="bg-cyber-rose/5 dark:bg-cyber-rose/10 border border-cyber-rose/20 hover:bg-cyber-rose/15 dark:hover:bg-cyber-rose/20 text-cyber-rose rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150">
+                        Delete Mapping
+                    </button>
+                    <button type="submit" class="bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 transition duration-150">
+                        Save Mapping
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Dedicated Instrument SCPI Console -->
+    <div id="console-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+        <div class="glass-panel rounded-3xl p-6 w-full max-w-xl shadow-2xl relative border border-slate-200 dark:border-white/10 glowing-border-indigo flex flex-col h-[500px]">
+            <button id="console-modal-close" class="absolute top-4 right-4 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+
+            <h3 class="font-title text-lg font-bold mb-1 flex items-center space-x-2 text-slate-800 dark:text-slate-100">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-indigo animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Instrument SCPI Console</span>
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4 font-mono leading-relaxed">
+                Direct SCPI Connection to Address: <span id="console-modal-addr" class="text-cyber-indigo font-bold">--</span> 
+                • <span id="console-modal-desc" class="text-slate-700 dark:text-slate-300">--</span>
+            </p>
+
+            <!-- Dedicated Console Feed -->
+            <div id="console-modal-feed" class="flex-grow bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-white/5 rounded-2xl p-4 overflow-y-auto font-mono text-xs leading-relaxed space-y-2 flex flex-col scrollbar-thin text-slate-800 dark:text-slate-100">
+                <div class="text-slate-500 italic">SCPI Terminal initialized. Enter raw commands or query codes below...</div>
+            </div>
+
+            <!-- Suggestion Badges Row -->
+            <div class="flex items-center space-x-2 mt-3 overflow-x-auto py-1 scrollbar-none text-[10px] font-mono text-slate-500 shrink-0">
+                <span class="font-semibold text-slate-600 dark:text-slate-500 uppercase">Quick SCPI:</span>
+                <button type="button" onclick="sendQuickCommand('*IDN?')" class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 hover:border-cyber-indigo text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-2 py-0.5 rounded transition font-mono">*IDN?</button>
+                <button type="button" onclick="sendQuickCommand('*RST')" class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 hover:border-cyber-indigo text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-2 py-0.5 rounded transition font-mono">*RST</button>
+                <button type="button" onclick="sendQuickCommand('MEAS:VOLT:DC?')" class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 hover:border-cyber-indigo text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-2 py-0.5 rounded transition font-mono">MEAS:VOLT:DC?</button>
+                <button type="button" onclick="sendQuickCommand('MEAS:CURR:DC?')" class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 hover:border-cyber-indigo text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-2 py-0.5 rounded transition font-mono">MEAS:CURR:DC?</button>
+            </div>
+
+            <!-- Console Form -->
+            <form id="console-modal-form" class="mt-3 flex space-x-2 shrink-0">
+                <input type="text" id="console-modal-input" placeholder="Enter SCPI command (e.g., *IDN?)" class="flex-grow bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-indigo focus:ring-1 focus:ring-cyber-indigo rounded-xl px-4 py-2.5 text-xs font-mono outline-none transition text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500">
+                <button type="submit" class="bg-cyber-indigo hover:opacity-95 text-white rounded-xl px-5 text-xs font-bold font-title tracking-wider shadow-lg shadow-cyber-indigo/10 transition active:scale-[0.98]">
+                    Execute
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Live Instrument Traffic Snoop Monitor -->
+    <div id="snoop-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+        <div class="glass-panel rounded-3xl p-6 w-full max-w-xl shadow-2xl relative border border-slate-200 dark:border-white/10 glowing-border-teal flex flex-col h-[500px]">
+            <button id="snoop-modal-close" class="absolute top-4 right-4 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+
+            <h3 class="font-title text-lg font-bold mb-1 flex items-center space-x-2 text-slate-800 dark:text-slate-100">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <span>Live Instrument Snoop Monitor</span>
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4 font-mono leading-relaxed">
+                Snooping Traffic on Address: <span id="snoop-modal-addr" class="text-cyber-teal font-bold">--</span> 
+                • <span id="snoop-modal-desc" class="text-slate-700 dark:text-slate-300">--</span>
+            </p>
+
+            <!-- Snooped Logs Terminal Feed -->
+            <div id="snoop-modal-feed" class="flex-grow bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-white/5 rounded-2xl p-4 overflow-y-auto font-mono text-xs leading-relaxed space-y-2 flex flex-col scrollbar-thin text-slate-800 dark:text-slate-100">
+                <div class="text-slate-500 italic">Connecting snoop stream... Waiting for instrument transactions...</div>
+            </div>
+
+            <!-- Snoop Controls Footer -->
+            <div class="flex items-center justify-between mt-4 shrink-0">
+                <div class="flex items-center space-x-3 text-xs text-slate-500 font-mono">
+                    <span class="flex h-2.5 w-2.5 relative">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-teal opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyber-teal"></span>
+                    </span>
+                    <span id="snoop-stream-status">Active Snoop Stream</span>
+                </div>
+                <div class="flex space-x-2">
+                    <button type="button" id="btn-snoop-pause" onclick="toggleSnoopPause()" class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-white/5 hover:border-cyber-teal text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-4 py-2 rounded-xl text-xs font-semibold transition">
+                        Pause Stream
+                    </button>
+                    <button type="button" id="btn-snoop-clear" onclick="clearSnoopFeed()" class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-white/5 hover:border-cyber-rose text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white px-4 py-2 rounded-xl text-xs font-semibold transition">
+                        Clear Feed
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Show All Detected VISA Hardware Instruments -->
+    <div id="modal-visa-instruments" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-panel border border-slate-200 dark:border-cyber-border rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-cyber-border flex items-center justify-between bg-slate-50 dark:bg-slate-900/80">
+                <div class="flex items-center space-x-2">
+                    <div class="p-2 bg-emerald-500/10 dark:bg-cyber-emerald/10 rounded-xl border border-emerald-300/50 dark:border-cyber-emerald/20 text-emerald-600 dark:text-cyber-emerald">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-title font-bold text-base tracking-wide text-slate-900 dark:text-slate-100">Connected VISA Hardware Instruments</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Select detected instruments below to auto-assign them to virtual slots</p>
+                    </div>
+                </div>
+                <button id="btn-close-visa-modal" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-100 transition p-1.5 hover:bg-slate-200/50 dark:hover:bg-white/5 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Master Selection Bar -->
+            <div class="px-6 py-2.5 bg-slate-100/70 dark:bg-slate-950/60 border-b border-slate-200 dark:border-white/5 flex items-center justify-between text-xs">
+                <label class="flex items-center space-x-2 cursor-pointer text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition">
+                    <input type="checkbox" id="visa-master-select" onchange="toggleSelectAllVisa(this)" checked class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-emerald focus:ring-0 w-4 h-4 cursor-pointer">
+                    <span class="font-semibold">Select / Deselect All</span>
+                </label>
+                <span class="text-slate-500 dark:text-slate-400 font-mono text-[11px]" id="visa-selected-counter">0 Selected</span>
+            </div>
+
+            <div class="p-6 space-y-4 overflow-y-auto flex-grow text-xs">
+                <div id="visa-instruments-list" class="space-y-2.5">
+                    <div class="text-slate-500 italic font-mono text-xs">Scanning VISA Hardware Bus...</div>
+                </div>
+            </div>
+
+            <!-- Footer: Refresh Scan (Left) | Force Overwrite Checkbox + Auto-Assign Selected (Right) -->
+            <div class="px-6 py-4 border-t border-slate-200 dark:border-cyber-border flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/80">
+                <button id="btn-refresh-visa-list" onclick="fetchVisaInstruments(true)" class="bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-cyber-border rounded-xl px-4 py-2 text-xs font-title tracking-wider transition shadow-sm">
+                    Refresh Scan
+                </button>
+                <div class="flex items-center space-x-3">
+                    <label class="flex items-center space-x-2 cursor-pointer text-slate-700 dark:text-rose-400 hover:text-slate-900 dark:hover:text-rose-300 transition">
+                        <input type="checkbox" id="visa-force-overwrite" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-rose-500 focus:ring-0 w-4 h-4 cursor-pointer">
+                        <span class="font-medium text-xs">Force Overwrite Existing Mappings</span>
+                    </label>
+                    <button id="btn-assign-selected-visa" onclick="autoAssignSelectedVisa()" class="bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white font-bold rounded-xl px-4 py-2 text-xs font-title tracking-wider shadow-lg transition flex items-center space-x-1.5 active:scale-[0.98]">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Auto-Assign Selected</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TestController Generator Utility Modal -->
+    <div id="modal-testcontroller" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-panel rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-cyber-border text-slate-900 dark:text-slate-100">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-cyber-border flex items-center justify-between bg-slate-50 dark:bg-slate-900/80">
+                <div class="flex items-center space-x-2">
+                    <div class="p-2 bg-teal-500/10 dark:bg-cyber-teal/10 rounded-xl border border-teal-300/50 dark:border-cyber-teal/20 text-teal-600 dark:text-cyber-teal">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="font-title font-bold text-base tracking-wide text-slate-900 dark:text-slate-100">TestController Configuration Utility</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Generate settingsGPIB.txt and settingsLoad.txt for TestController</p>
+                    </div>
+                </div>
+                <button id="btn-close-tc-modal" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-100 transition p-1.5 hover:bg-slate-200/50 dark:hover:bg-white/5 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="p-6 space-y-4 overflow-y-auto flex-grow text-xs">
+                <!-- TestController Usage & Multi-Adapter Note Callout -->
+                <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-cyber-border rounded-xl p-3.5 text-xs text-slate-700 dark:text-slate-300 space-y-2 leading-relaxed shadow-sm">
+                    <p class="font-bold text-teal-700 dark:text-cyber-teal flex items-center space-x-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>TestController Multi-Instrument Setup Guidance</span>
+                    </p>
+                    <p>
+                        • <strong>Separate Adapters Mode (Recommended Default)</strong>: Configuration files are auto-generated with each instrument assigned its own Prologix Ethernet adapter ID (<code>A</code>, <code>B</code>, <code>C</code>...) pointing to <code>127.0.0.1:1234</code>. This prevents TestController's internal Java single-socket thread lock contention on startup.
+                    </p>
+                    <p>
+                        • <strong>Single Adapter Option</strong>: Uncheck "Separate Adapter IDs" below if you prefer to group all instruments under a single GPIB controller ID (e.g., ID <code>A</code>).
+                    </p>
+                    <p class="text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                        • <strong>File Destination Directory</strong>: Downloaded <code>settingsGPIB.txt</code> and <code>settingsLoad.txt</code> files should be placed directly into TestController's <code>Settings</code> directory (typically located at <code>Documents\TestController\Settings</code> or <code>TestController\Settings</code>).
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 mb-1">Fallback Controller ID</label>
+                        <input type="text" id="tc-ctrl-id" value="A" maxlength="2" class="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-cyber-border rounded-xl px-3 py-2 text-slate-900 dark:text-slate-100 font-mono focus:border-cyber-teal outline-none uppercase" />
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 mb-1">Gateway Host / IP</label>
+                        <input type="text" id="tc-host" value="127.0.0.1" class="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-cyber-border rounded-xl px-3 py-2 text-slate-900 dark:text-slate-100 font-mono focus:border-cyber-teal outline-none" />
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-800 dark:text-slate-200 py-1">
+                    <input type="checkbox" id="tc-separate-adapters" checked class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-950 text-cyber-teal focus:ring-0">
+                    <span class="font-semibold">Assign Separate Adapter IDs (A, B, C...) [Prevents startup thread stalls]</span>
+                </div>
+
+                <!-- settingsGPIB.txt preview -->
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="font-mono font-bold text-slate-700 dark:text-slate-300">settingsGPIB.txt</span>
+                        <button id="btn-copy-gpib" class="text-[10px] text-teal-700 dark:text-cyber-teal hover:underline font-mono">Copy Text</button>
+                    </div>
+                    <textarea id="tc-gpib-text" readonly rows="2" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-cyber-border rounded-xl p-3 text-slate-800 dark:text-slate-200 font-mono text-[11px] outline-none select-all"></textarea>
+                </div>
+
+                <!-- settingsLoad.txt preview -->
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="font-mono font-bold text-slate-700 dark:text-slate-300">settingsLoad.txt</span>
+                        <button id="btn-copy-load" class="text-[10px] text-teal-700 dark:text-cyber-teal hover:underline font-mono">Copy Text</button>
+                    </div>
+                    <textarea id="tc-load-text" readonly rows="6" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-cyber-border rounded-xl p-3 text-slate-800 dark:text-slate-200 font-mono text-[11px] outline-none select-all"></textarea>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-4 border-t border-slate-200 dark:border-cyber-border flex items-center justify-end space-x-3 bg-slate-50 dark:bg-slate-900/80">
+                <button id="btn-download-tc-gpib" class="bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-cyber-border rounded-xl px-4 py-2 text-xs font-bold font-title tracking-wider transition shadow-sm">
+                    Download settingsGPIB.txt
+                </button>
+                <button id="btn-download-tc-load" class="bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white font-bold rounded-xl px-4 py-2 text-xs font-title tracking-wider shadow-lg transition active:scale-[0.98]">
+                    Download settingsLoad.txt
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP JAVASCRIPT -->
+    <script>
+        // Theme initialization and toggle logic
+        document.addEventListener('DOMContentLoaded', () => {
+            const btnThemeToggle = document.getElementById('btn-theme-toggle');
+            const sunIcon = document.getElementById('theme-icon-sun');
+            const moonIcon = document.getElementById('theme-icon-moon');
+            const themeText = document.getElementById('theme-toggle-text');
+            const html = document.documentElement;
+
+            const applyTheme = (theme) => {
+                if (theme === 'light') {
+                    html.classList.remove('dark');
+                    sunIcon.classList.remove('hidden');
+                    moonIcon.classList.add('hidden');
+                    if (themeText) themeText.textContent = 'LIGHT THEME';
+                } else {
+                    html.classList.add('dark');
+                    sunIcon.classList.add('hidden');
+                    moonIcon.classList.remove('hidden');
+                    if (themeText) themeText.textContent = 'DARK THEME';
+                }
+            };
+
+            // Detect theme preference
+            const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            applyTheme(savedTheme);
+
+            if (btnThemeToggle) {
+                btnThemeToggle.addEventListener('click', () => {
+                    const currentTheme = html.classList.contains('dark') ? 'dark' : 'light';
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    localStorage.setItem('theme', newTheme);
+                    applyTheme(newTheme);
+                });
+            }
+        });
+
+        // Cached list of scanned hardware devices
+        let scannedDevices = [];
+
+        // Populates the modal's dropdown with mock and discovered physical devices
+        function populateDiscoveredDropdown() {
+            const selectEl = document.getElementById('modal-discovered-select');
+            if (!selectEl) return;
+
+            // Save the currently selected value to restore it later if possible
+            const currentVal = selectEl.value;
+
+            selectEl.innerHTML = '';
+            
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '-- Choose a Discovered Device --';
+            selectEl.appendChild(placeholder);
+
+            // Group 1: Mocks (always available)
+            const mockHeader = document.createElement('optgroup');
+            mockHeader.label = 'Simulated Hardware (Mocks)';
+            
+            const mockDmm = document.createElement('option');
+            mockDmm.value = 'MOCK::DMM::INSTR';
+            mockDmm.textContent = 'MOCK::DMM::INSTR (HP 34401A Multimeter)';
+            mockDmm.setAttribute('data-idn', 'HEWLETT-PACKARD,34401A,0,10.0-1.0-1.0');
+            mockHeader.appendChild(mockDmm);
+
+            const mockScope = document.createElement('option');
+            mockScope.value = 'MOCK::SCOPE::INSTR';
+            mockScope.textContent = 'MOCK::SCOPE::INSTR (Tektronix TDS2024 Oscilloscope)';
+            mockScope.setAttribute('data-idn', 'TEKTRONIX,TDS 2024,0,10.0-1.0-1.0');
+            mockHeader.appendChild(mockScope);
+
+            selectEl.appendChild(mockHeader);
+
+            // Group 2: Discovered Physical Hardware
+            if (scannedDevices && scannedDevices.length > 0) {
+                const physHeader = document.createElement('optgroup');
+                physHeader.label = 'Physical Hardware (Discovered)';
+                
+                scannedDevices.forEach(dev => {
+                    if (dev.visa_address.startsWith('MOCK::')) return;
+
+                    const opt = document.createElement('option');
+                    opt.value = dev.visa_address;
+                    opt.textContent = `${dev.visa_address} (${dev.idn})`;
+                    opt.setAttribute('data-idn', dev.idn);
+                    physHeader.appendChild(opt);
+                });
+                selectEl.appendChild(physHeader);
+            }
+
+            // Restore selection if matching
+            if (currentVal) {
+                selectEl.value = currentVal;
+            }
+        }
+
+        // Handles auto-filling input boxes when a selection is made
+        function onDiscoveredSelectChanged(selectEl) {
+            const selectedOpt = selectEl.options[selectEl.selectedIndex];
+            if (!selectedOpt || !selectedOpt.value) return;
+
+            const visaAddress = selectedOpt.value;
+            const idnResponse = selectedOpt.getAttribute('data-idn') || '';
+            
+            document.getElementById('modal-visa-address').value = visaAddress;
+
+            // Generate clean descriptions & IDN patterns automatically
+            let desc = "";
+            let idnPattern = "";
+
+            if (visaAddress.startsWith('MOCK::')) {
+                if (visaAddress.includes('DMM')) {
+                    desc = "Simulated HP 34401A Multimeter";
+                    idnPattern = "HEWLETT-PACKARD,34401A";
+                } else if (visaAddress.includes('SCOPE')) {
+                    desc = "Simulated Tektronix TDS 2024 Oscilloscope";
+                    idnPattern = "TEKTRONIX,TDS 2024";
+                } else {
+                    desc = "Simulated Instrument";
+                    idnPattern = "MOCK";
+                }
+            } else if (idnResponse && idnResponse !== "Unknown / No Response") {
+                const parts = idnResponse.split(',');
+                if (parts.length >= 2) {
+                    const manufacturer = parts[0].trim();
+                    const model = parts[1].trim();
+                    desc = `${manufacturer} ${model}`;
+                    idnPattern = `${manufacturer},${model}`;
+                } else {
+                    desc = idnResponse.substring(0, 30).trim();
+                    idnPattern = idnResponse.substring(0, 20).trim();
+                }
+            } else {
+                desc = "Physical Instrument";
+                idnPattern = "";
+            }
+
+            document.getElementById('modal-description').value = desc;
+            document.getElementById('modal-idn-pattern').value = idnPattern;
+        }
+
+        // Main app state
+        let appState = {
+            settings: {},
+            mappings: {},
+            activeAddress: 1
+        };
+
+        // Populate Address Select list if present
+        const addrSelect = document.getElementById('set-addr');
+        if (addrSelect) {
+            for (let i = 0; i <= 30; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = `Address ${i}`;
+                addrSelect.appendChild(opt);
+            }
+        }
+
+        // Render virtual patch panel grid (31 slots: 0-30)
+        let lastRenderKey = "";
+        function renderPatchPanel() {
+            const renderKey = JSON.stringify({
+                mappings: appState.mappings,
+                addr: appState.settings.addr
+            });
+            if (renderKey === lastRenderKey) {
+                return; // Mappings and addressed slot are identical; skip re-rendering to prevent hover flickers
+            }
+            lastRenderKey = renderKey;
+
+            const grid = document.getElementById('patch-panel-grid');
+            grid.innerHTML = '';
+
+            for (let i = 0; i <= 30; i++) {
+                const isAddressed = (i === appState.settings.addr);
+                const mapping = appState.mappings[i.toString()];
+                
+                const card = document.createElement('div');
+                card.className = `glass-panel rounded-2xl p-3.5 flex flex-col justify-between cursor-pointer border hover:scale-[1.03] transition-all duration-200 ${
+                    isAddressed 
+                        ? 'border-cyber-teal/50 bg-cyber-teal/5 text-slate-800 dark:text-slate-100 shadow-[0_0_12px_-2px_rgba(20,184,166,0.15)]' 
+                        : 'border-slate-200 dark:border-white/5 hover:border-slate-400 dark:hover:border-slate-600 bg-slate-50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300'
+                }`;
+                
+                card.onclick = () => openMappingModal(i);
+
+                // Slot contents
+                let bodyHtml = '';
+                if (mapping) {
+                    bodyHtml = `
+                        <div class="flex items-start justify-between">
+                            <span class="text-xs font-mono font-bold px-2 py-0.5 rounded ${isAddressed ? 'bg-cyber-teal/20 text-cyber-teal' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}">${i}</span>
+                            <div class="flex items-center space-x-1">
+                                ${i === 0 ? '<span class="text-[9px] font-mono tracking-wide px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-500 bg-amber-500/10 font-bold" title="Address 0 is reserved for the Prologix Controller. Avoid instrument mapping.">Avoid 0</span>' : ''}
+                                <button title="Heal Mapped USB Port" onclick="event.stopPropagation(); healSingleSlot(${i})" class="p-1 hover:bg-cyber-emerald/15 border border-transparent hover:border-cyber-emerald/35 text-slate-400 hover:text-cyber-emerald rounded-md transition duration-150">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                </button>
+                                <button title="Snoop Traffic (Spy)" onclick="event.stopPropagation(); openSnoopMonitor(${i})" class="p-1 hover:bg-cyber-teal/15 border border-transparent hover:border-cyber-teal/35 text-slate-400 hover:text-cyber-teal rounded-md transition duration-150">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                </button>
+                                <button title="Launch SCPI Console" onclick="event.stopPropagation(); openInstrumentConsole(${i})" class="p-1 hover:bg-cyber-indigo/15 border border-transparent hover:border-cyber-indigo/35 text-slate-400 hover:text-cyber-indigo rounded-md transition duration-150">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                </button>
+                                <span class="flex h-2 w-2 rounded-full ${mapping.visa_address.startsWith('MOCK::') ? 'bg-cyber-indigo shadow-lg shadow-cyber-indigo/30' : 'bg-cyber-emerald shadow-lg shadow-cyber-emerald/30'}"></span>
+                            </div>
+                        </div>
+                        <div class="mt-2.5">
+                            <h4 class="text-xs font-bold truncate leading-tight">${mapping.description || 'Device'}</h4>
+                            <p class="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-1 truncate max-w-full" title="${mapping.visa_address}">${mapping.visa_address}</p>
+                        </div>
+                    `;
+                } else {
+                    bodyHtml = `
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-mono font-semibold text-slate-400 dark:text-slate-500">${i}</span>
+                            ${i === 0 ? '<span class="text-[9px] font-mono tracking-wide px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-500 bg-amber-500/10 font-bold" title="Address 0 is reserved for the Prologix Controller on physical GPIB buses.">Ctrl Reserved</span>' : '<span class="text-[9px] font-mono tracking-wide px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-400 dark:text-slate-500 uppercase font-medium">Unmapped</span>'}
+                        </div>
+                        <div class="mt-4 flex items-center justify-center text-slate-400 dark:text-slate-600 hover:text-cyber-teal/60 transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </div>
+                    `;
+                }
+                
+                card.innerHTML = bodyHtml;
+                grid.appendChild(card);
+            }
+        }
+
+        // Fetch application states
+        async function fetchState() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                appState.settings = data.prologix_settings;
+                appState.activeAddress = data.prologix_settings.addr;
+
+                // Sync status badges
+                const sockStatus = document.getElementById('socket-status');
+                if (data.socket_server.active) {
+                    sockStatus.textContent = 'Socket Port 1234: Active';
+                    sockStatus.className = 'text-xs font-mono font-semibold text-cyber-teal dark:text-teal-400';
+                } else {
+                    sockStatus.textContent = 'Socket Port 1234: Offline';
+                    sockStatus.className = 'text-xs font-mono font-semibold text-cyber-rose dark:text-rose-400';
+                }
+
+                document.getElementById('client-count').textContent = data.socket_server.client_count;
+
+                // Sync Prologix parameter configurations display
+                const statMode = document.getElementById('stat-mode');
+                const statAuto = document.getElementById('stat-auto');
+                const statEos = document.getElementById('stat-eos');
+                const statEoi = document.getElementById('stat-eoi');
+                const statReadTmo = document.getElementById('stat-read-tmo');
+
+                if (statMode) statMode.textContent = appState.settings.mode === 1 ? 'Controller (1)' : 'Device (0)';
+                if (statAuto) statAuto.textContent = appState.settings.auto === 1 ? 'RAW ON (1)' : 'Manual (0)';
+                
+                if (statEos) {
+                    const eosMapping = {
+                        0: 'CR + LF (0)',
+                        1: 'CR Only (1)',
+                        2: 'LF Only (2)',
+                        3: 'None (3)'
+                    };
+                    statEos.textContent = eosMapping[appState.settings.eos] || `Mode ${appState.settings.eos}`;
+                }
+                
+                if (statEoi) statEoi.textContent = appState.settings.eoi === 1 ? 'Asserted (1)' : 'Disabled (0)';
+                if (statReadTmo) statReadTmo.textContent = `${appState.settings.read_tmo_ms} ms`;
+
+                // Sync settings forms values (only if user is not actively editing)
+                if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+                    const setAddrEl = document.getElementById('set-addr');
+                    if (setAddrEl) setAddrEl.value = appState.settings.addr;
+                    document.getElementById('set-auto').value = appState.settings.auto;
+                    document.getElementById('set-mode').value = appState.settings.mode;
+                    document.getElementById('set-eos').value = appState.settings.eos;
+                    document.getElementById('set-eoi').value = appState.settings.eoi;
+                    document.getElementById('set-read-tmo-ms').value = appState.settings.read_tmo_ms;
+                    document.getElementById('set-unmapped-behavior').value = appState.settings.unmapped_behavior || 'message';
+                    document.getElementById('set-eot-enable').value = appState.settings.eot_enable;
+                    document.getElementById('set-eot-char').value = appState.settings.eot_char;
+                    if (document.getElementById('set-auto-heal-usb')) {
+                        document.getElementById('set-auto-heal-usb').checked = appState.settings.auto_heal_usb !== false;
+                    }
+                    
+                    // Sync logging parameters
+                    document.getElementById('set-log-level').value = appState.settings.log_level || 'INFO';
+                    document.getElementById('set-enable-stdout').checked = !!appState.settings.enable_stdout;
+                    document.getElementById('set-log-traffic').checked = !!appState.settings.log_category_traffic;
+                    document.getElementById('set-log-visa').checked = !!appState.settings.log_category_visa;
+                    document.getElementById('set-log-system').checked = !!appState.settings.log_category_system;
+                }
+
+                // Fetch mappings
+                const mResponse = await fetch('/api/mappings');
+                appState.mappings = await mResponse.json();
+
+                renderPatchPanel();
+                updateConsoleTarget();
+            } catch (err) {
+                console.error("Error syncing status: ", err);
+            }
+        }
+
+        // Update Console Target badge
+        function updateConsoleTarget() {
+            const badge = document.getElementById('console-target');
+            const mapping = appState.mappings[appState.activeAddress.toString()];
+            if (mapping) {
+                badge.textContent = `Slot: ${appState.activeAddress} (${mapping.description || 'Device'})`;
+                badge.className = 'text-[10px] font-mono font-bold px-2 py-0.5 bg-cyber-indigo/10 border border-cyber-indigo/20 text-cyber-indigo rounded max-w-[200px] truncate';
+            } else {
+                badge.textContent = `Slot: ${appState.activeAddress} (Unmapped)`;
+                badge.className = 'text-[10px] font-mono font-medium px-2 py-0.5 bg-slate-900 border border-white/5 text-slate-500 rounded';
+            }
+        }
+
+        // Fetch logs periodically
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const logs = await response.json();
+                
+                const feed = document.getElementById('log-feed');
+                // Check if user is scrolled to bottom
+                const isScrolledToBottom = feed.scrollHeight - feed.clientHeight <= feed.scrollTop + 30;
+
+                const filterSys = document.getElementById('filter-log-sys').checked;
+                const filterVisa = document.getElementById('filter-log-visa').checked;
+                const filterTraffic = document.getElementById('filter-log-traffic').checked;
+
+                const filteredLogs = logs.filter(log => {
+                    const cat = log.category || '';
+                    if (cat === 'TRAFFIC_IN' || cat === 'TRAFFIC_OUT') {
+                        return filterTraffic;
+                    }
+                    if (cat.includes('INSTR') || cat.includes('VISA') || cat === 'SCAN') {
+                        return filterVisa;
+                    }
+                    return filterSys;
+                });
+
+                feed.innerHTML = '';
+                if (filteredLogs.length === 0) {
+                    feed.innerHTML = '<div class="text-slate-500 italic text-center py-4">No matching logs found for active filters.</div>';
+                    return;
+                }
+
+                filteredLogs.forEach(log => {
+                    const el = document.createElement('div');
+                    
+                    let catColor = 'text-slate-500 dark:text-slate-400';
+                    if (log.category === 'TRAFFIC_IN') catColor = 'text-cyber-indigo dark:text-indigo-400 font-bold';
+                    else if (log.category === 'TRAFFIC_OUT') catColor = 'text-cyber-teal dark:text-teal-400 font-bold';
+                    else if (log.category === 'SOCKET_SERVER') catColor = 'text-cyber-amber dark:text-amber-500';
+                    else if (log.category === 'INSTR_WRITE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
+                    else if (log.category === 'INSTR_READ') catColor = 'text-teal-600 dark:text-teal-400 font-semibold';
+                    else if (log.category === 'HEALER') catColor = 'text-cyber-emerald dark:text-emerald-400 font-bold';
+                    else if (log.category === 'CONSOLE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
+                    
+                    let levelColor = 'text-slate-500 dark:text-slate-400';
+                    if (log.level === 'WARN') levelColor = 'text-cyber-amber dark:text-amber-500 font-bold';
+                    else if (log.level === 'ERROR') levelColor = 'text-cyber-rose dark:text-rose-400 font-bold';
+
+                    el.className = 'border-b border-slate-200 dark:border-white/5 pb-1';
+                    el.innerHTML = `
+                        <span class="text-slate-500 text-[9px] font-normal">[${log.timestamp.split(' ')[1]}]</span>
+                        <span class="text-[9px] uppercase tracking-wider font-semibold ${levelColor}">${log.level}</span>
+                        <span class="text-[9px] uppercase tracking-wider font-semibold ${catColor}">[${log.category}]</span>
+                        <span class="text-slate-700 dark:text-slate-300 ml-1 font-mono">${log.message}</span>
+                    `;
+                    feed.appendChild(el);
+                });
+
+                if (isScrolledToBottom) {
+                    feed.scrollTop = feed.scrollHeight;
+                }
+            } catch (err) {
+                console.error("Error fetching logs: ", err);
+            }
+        }
+
+        // Setup settings forms apply
+        document.getElementById('settings-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const payload = {};
+            formData.forEach((value, key) => {
+                if (key === 'unmapped_behavior') {
+                    payload[key] = value;
+                } else if (key === 'auto_heal_usb') {
+                    payload[key] = true;
+                } else {
+                    payload[key] = parseInt(value);
+                }
+            });
+            if (!formData.has('auto_heal_usb')) {
+                payload['auto_heal_usb'] = false;
+            }
+
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    appendConsoleMessage('SYSTEM', `Prologix settings updated successfully.`);
+                    fetchState();
+                } else {
+                    alert(`Error: ${data.detail}`);
+                }
+            } catch (err) {
+                alert(`API Error: ${err}`);
+            }
+        };
+
+        async function healSingleSlot(slot) {
+            appendConsoleMessage('SYSTEM', `Checking USB port healing for virtual slot ${slot}...`);
+            try {
+                const res = await fetch(`/api/heal?slot=${slot}`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    if (data.healed_count > 0) {
+                        const action = data.actions[0];
+                        appendConsoleMessage('SYSTEM', `✔ Slot ${action.virtual_address} Healed: ${action.old_visa_address} ➔ ${action.new_visa_address}`);
+                        fetchState();
+                    } else {
+                        appendConsoleMessage('SYSTEM', `Slot ${slot} verified: device is present and active at mapped port.`);
+                    }
+                } else {
+                    appendConsoleMessage('ERROR', `Heal slot ${slot} failed: ${data.detail}`, true);
+                }
+            } catch (err) {
+                appendConsoleMessage('ERROR', `Heal slot ${slot} failed: ${err}`, true);
+            }
+        }
+
+        // Setup logging form apply
+        document.getElementById('logging-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const payload = {
+                log_level: document.getElementById('set-log-level').value,
+                enable_stdout: document.getElementById('set-enable-stdout').checked,
+                log_category_traffic: document.getElementById('set-log-traffic').checked,
+                log_category_visa: document.getElementById('set-log-visa').checked,
+                log_category_system: document.getElementById('set-log-system').checked
+            };
+
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    appendConsoleMessage('SYSTEM', `Logging and verbosity configurations updated successfully.`);
+                    fetchState();
+                } else {
+                    alert(`Error: ${data.detail}`);
+                }
+            } catch (err) {
+                alert(`API Error: ${err}`);
+            }
+        };
+
+        // Modal Management
+        function openMappingModal(address) {
+            const modal = document.getElementById('mapping-modal');
+            document.getElementById('modal-addr').value = address;
+            document.getElementById('modal-addr-title').textContent = address;
+
+            // Rebuild dropdown to include any newly discovered physical or mock devices
+            populateDiscoveredDropdown();
+
+            const mapping = appState.mappings[address.toString()];
+            if (mapping) {
+                document.getElementById('modal-visa-address').value = mapping.visa_address;
+                document.getElementById('modal-idn-pattern').value = mapping.idn_pattern || '';
+                document.getElementById('modal-description').value = mapping.description || '';
+                document.getElementById('modal-btn-delete').style.display = 'block';
+
+                // Try to select the matched resource address in the dropdown
+                document.getElementById('modal-discovered-select').value = mapping.visa_address;
+            } else {
+                document.getElementById('modal-visa-address').value = '';
+                document.getElementById('modal-idn-pattern').value = '';
+                document.getElementById('modal-description').value = '';
+                document.getElementById('modal-btn-delete').style.display = 'none';
+
+                // Clear dropdown selection
+                document.getElementById('modal-discovered-select').value = '';
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        document.getElementById('modal-close').onclick = () => {
+            document.getElementById('mapping-modal').classList.add('hidden');
+        };
+
+        // Close modal on click outside content
+        document.getElementById('mapping-modal').onclick = (e) => {
+            if (e.target === document.getElementById('mapping-modal')) {
+                document.getElementById('mapping-modal').classList.add('hidden');
+            }
+        };
+
+        // Handle mapping edit save
+        document.getElementById('mapping-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const address = document.getElementById('modal-addr').value;
+            const payload = {
+                visa_address: document.getElementById('modal-visa-address').value.trim(),
+                idn_pattern: document.getElementById('modal-idn-pattern').value.trim(),
+                description: document.getElementById('modal-description').value.trim()
+            };
+
+            try {
+                const res = await fetch(`/api/mappings/${address}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    document.getElementById('mapping-modal').classList.add('hidden');
+                    appendConsoleMessage('SYSTEM', `Saved mapping for Virtual Address ${address}.`);
+                    fetchState();
+                } else {
+                    const data = await res.json();
+                    alert(`Error saving mapping: ${data.detail}`);
+                }
+            } catch (err) {
+                alert(`API Error: ${err}`);
+            }
+        };
+
+        // Handle mapping delete
+        document.getElementById('modal-btn-delete').onclick = async () => {
+            const address = document.getElementById('modal-addr').value;
+            if (!confirm(`Are you sure you want to clear mapping for Address ${address}?`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/mappings/${address}`, { method: 'DELETE' });
+                if (res.ok) {
+                    document.getElementById('mapping-modal').classList.add('hidden');
+                    appendConsoleMessage('SYSTEM', `Cleared mapping for Virtual Address ${address}.`);
+                    fetchState();
+                } else {
+                    const data = await res.json();
+                    alert(`Error deleting mapping: ${data.detail}`);
+                }
+            } catch (err) {
+                alert(`API Error: ${err}`);
+            }
+        };
+
+        // Console Utilities
+        function appendConsoleMessage(source, text, isError = false) {
+            const feed = document.getElementById('console-feed');
+            const el = document.createElement('div');
+            
+            let color = 'text-slate-300';
+            if (source === 'CMD') color = 'text-cyber-amber';
+            else if (source === 'RESP') color = 'text-cyber-teal';
+            else if (source === 'SYSTEM') color = 'text-cyber-indigo italic font-semibold';
+            
+            if (isError) color = 'text-cyber-rose font-bold';
+
+            el.className = 'text-xs font-mono';
+            el.innerHTML = `<span class="${color}">[${source}]</span> <span class="text-slate-100">${text}</span>`;
+            
+            feed.appendChild(el);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        document.getElementById('console-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('console-input');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+
+            appendConsoleMessage('CMD', cmd);
+            input.value = '';
+
+            try {
+                const res = await fetch('/api/send_command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        command: cmd,
+                        virtual_address: appState.activeAddress
+                    })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    appendConsoleMessage('RESP', data.response);
+                } else {
+                    appendConsoleMessage('ERROR', data.detail, true);
+                }
+            } catch (err) {
+                appendConsoleMessage('ERROR', `Connection failed: ${err}`, true);
+            }
+        };
+
+        // Scan Hardware button
+        const btnScanEl = document.getElementById('btn-scan');
+        if (btnScanEl) {
+            btnScanEl.onclick = async () => {
+                btnScanEl.disabled = true;
+                btnScanEl.classList.add('opacity-70');
+                appendConsoleMessage('SYSTEM', 'Initiating VISA hardware resource scanning...');
+
+                try {
+                    const res = await fetch('/api/scan');
+                    const data = await res.json();
+                    if (res.ok) {
+                        scannedDevices = data; // Cache globally
+                        populateDiscoveredDropdown(); // Re-render dropdown list
+                        appendConsoleMessage('SYSTEM', `Scan complete. Found ${data.length} potential devices:`);
+                        data.forEach(dev => {
+                            appendConsoleMessage('SYSTEM', `• ${dev.visa_address} [${dev.idn}]`);
+                        });
+                    } else {
+                        appendConsoleMessage('ERROR', `Scan failed: ${data.detail}`, true);
+                    }
+                } catch (err) {
+                    appendConsoleMessage('ERROR', `Scan failed: ${err}`, true);
+                } finally {
+                    btnScanEl.disabled = false;
+                    btnScanEl.classList.remove('opacity-70');
+                }
+            };
+        }
+
+        // Heal Mappings button
+        const btnHealEl = document.getElementById('btn-heal');
+        if (btnHealEl) {
+            btnHealEl.onclick = async () => {
+                btnHealEl.disabled = true;
+                btnHealEl.classList.add('opacity-70');
+                appendConsoleMessage('SYSTEM', 'Initiating automated USB Lottery Healing matching...');
+
+                try {
+                    const res = await fetch('/api/heal', { method: 'POST' });
+                    const data = await res.json();
+                    if (res.ok) {
+                        if (data.healed_count > 0) {
+                            appendConsoleMessage('SYSTEM', `HEALED ${data.healed_count} mappings successfully!`);
+                            data.actions.forEach(action => {
+                                appendConsoleMessage('SYSTEM', `✔ Slot ${action.virtual_address}: ${action.old_visa_address} -> ${action.new_visa_address} [${action.matched_idn.split(',')[1]}]`);
+                            });
+                            fetchState();
+                        } else {
+                            appendConsoleMessage('SYSTEM', 'Lottery healing executed. All mapped devices verified at their expected ports (0 changes).');
+                        }
+                    } else {
+                        appendConsoleMessage('ERROR', `Healer failed: ${data.detail}`, true);
+                    }
+                } catch (err) {
+                    appendConsoleMessage('ERROR', `Healer failed: ${err}`, true);
+                } finally {
+                    btnHealEl.disabled = false;
+                    btnHealEl.classList.remove('opacity-70');
+                }
+            };
+        }
+
+        // Clear logs button
+        document.getElementById('btn-clear-logs').onclick = async () => {
+            if (confirm("Clear live log buffer?")) {
+                await fetch('/api/logs', { method: 'DELETE' });
+                fetchLogs();
+            }
+        };
+
+        // Global Gateway Restart & Stop triggers
+        function triggerGatewayRestart() {
+            if (confirm("Are you sure you want to RESTART the VISA Mapping TCP/IP Socket Gateway (VMSG)?\nThis will release and re-bind ports 1234 and 8080.")) {
+                appendConsoleMessage('SYSTEM', 'Initiating gateway restart...');
+                
+                const overlay = document.createElement('div');
+                overlay.className = 'fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex flex-col items-center justify-center text-white';
+                overlay.innerHTML = `
+                    <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyber-teal mb-4"></div>
+                    <h2 class="text-xl font-bold tracking-wide font-title text-cyber-teal">Restarting Gateway (VMSG)...</h2>
+                    <p class="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">Releasing and re-binding server ports</p>
+                    <p class="text-sm text-slate-300 mt-6">Please wait, the page will refresh in <span id="restart-countdown" class="font-bold text-cyber-teal">5</span> seconds...</p>
+                `;
+                document.body.appendChild(overlay);
+
+                let countdown = 5;
+                const timer = setInterval(() => {
+                    countdown--;
+                    document.getElementById('restart-countdown').innerText = countdown;
+                    if (countdown <= 0) {
+                        clearInterval(timer);
+                        window.location.reload();
+                    }
+                }, 1000);
+
+                try {
+                    fetch('/api/system/restart', { method: 'POST' });
+                } catch (err) {
+                    console.error("Restart request sent (connection dropped as expected).");
+                }
+            }
+        }
+
+        function triggerGatewayStop() {
+            if (confirm("Are you sure you want to STOP the VISA Mapping TCP/IP Socket Gateway (VMSG)?\nThe socket server and web service will shut down completely.")) {
+                appendConsoleMessage('SYSTEM', 'Initiating clean gateway shutdown...');
+
+                const overlay = document.createElement('div');
+                overlay.className = 'fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col items-center justify-center text-white';
+                overlay.innerHTML = `
+                    <div class="bg-rose-500/10 border border-rose-500/20 p-4 rounded-full mb-4 text-rose-500 shadow-lg shadow-rose-500/15">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                    </div>
+                    <h2 class="text-xl font-bold tracking-wide font-title text-rose-400">Gateway Stopped</h2>
+                    <p class="text-xs text-slate-400 font-mono mt-2 uppercase tracking-widest">Both Socket and Web Services are Offline</p>
+                    <p class="text-sm text-slate-300 mt-6 max-w-sm text-center leading-relaxed">The gateway process has been shutdown. You can safely close this browser window or restart it from your terminal.</p>
+                `;
+                document.body.appendChild(overlay);
+
+                try {
+                    fetch('/api/system/stop', { method: 'POST' });
+                } catch (err) {
+                    console.error("Stop request sent (connection dropped as expected).");
+                }
+            }
+        }
+
+        // Sliding Admin Drawer Toggle Controllers
+        const adminDrawer = document.getElementById('admin-drawer');
+        const adminOverlay = document.getElementById('admin-drawer-overlay');
+        const btnOpenAdmin = document.getElementById('btn-open-admin');
+        const btnCloseAdmin = document.getElementById('btn-close-admin');
+
+        function openAdminDrawer() {
+            adminOverlay.classList.remove('hidden');
+            setTimeout(() => {
+                adminOverlay.classList.remove('opacity-0');
+                adminOverlay.classList.add('opacity-100');
+            }, 10);
+            adminDrawer.classList.remove('-translate-x-full');
+            adminDrawer.classList.add('translate-x-0');
+        }
+
+        function closeAdminDrawer() {
+            adminOverlay.classList.remove('opacity-100');
+            adminOverlay.classList.add('opacity-0');
+            adminDrawer.classList.remove('translate-x-0');
+            adminDrawer.classList.add('-translate-x-full');
+            setTimeout(() => {
+                adminOverlay.classList.add('hidden');
+            }, 300);
+        }
+
+        btnOpenAdmin.onclick = openAdminDrawer;
+        btnCloseAdmin.onclick = closeAdminDrawer;
+        adminOverlay.onclick = closeAdminDrawer;
+
+        // TestController Modal Controllers
+        const tcModal = document.getElementById('modal-testcontroller');
+        const btnOpenTC = document.getElementById('btn-open-tc');
+        const btnCloseTC = document.getElementById('btn-close-tc-modal');
+        const tcCtrlIdInput = document.getElementById('tc-ctrl-id');
+        const tcHostInput = document.getElementById('tc-host');
+        const tcSeparateChk = document.getElementById('tc-separate-adapters');
+
+        async function fetchTestControllerConfig() {
+            try {
+                const ctrlId = tcCtrlIdInput.value.trim() || 'A';
+                const host = tcHostInput.value.trim() || window.location.hostname || '127.0.0.1';
+                const separateAdapters = tcSeparateChk ? tcSeparateChk.checked : true;
+                const res = await fetch(`/api/testcontroller/config?controller_id=${encodeURIComponent(ctrlId)}&host=${encodeURIComponent(host)}&separate_adapters=${separateAdapters}`);
+                if (!res.ok) throw new Error("Failed to generate TestController config");
+                const data = await res.json();
+                document.getElementById('tc-gpib-text').value = data.settingsGPIB || '';
+                document.getElementById('tc-load-text').value = data.settingsLoad || '';
+            } catch (err) {
+                console.error("TestController Config generation error:", err);
+            }
+        }
+
+        if (btnOpenTC) {
+            btnOpenTC.onclick = () => {
+                if (window.location.hostname && window.location.hostname !== 'localhost') {
+                    tcHostInput.value = window.location.hostname;
+                }
+                tcModal.classList.remove('hidden');
+                fetchTestControllerConfig();
+            };
+        }
+
+        if (btnCloseTC) {
+            btnCloseTC.onclick = () => tcModal.classList.add('hidden');
+        }
+
+        tcModal.onclick = (e) => {
+            if (e.target === tcModal) tcModal.classList.add('hidden');
+        };
+
+        [tcCtrlIdInput, tcHostInput, tcSeparateChk].forEach(inp => {
+            if (inp) {
+                inp.addEventListener('input', fetchTestControllerConfig);
+                inp.addEventListener('change', fetchTestControllerConfig);
+            }
+        });
+
+        // VISA Hardware Modal Controllers & Checkable Auto-Assign Logic
+        const visaModal = document.getElementById('modal-visa-instruments');
+        const btnOpenVisa = document.getElementById('btn-open-visa-modal');
+        const btnCloseVisa = document.getElementById('btn-close-visa-modal');
+
+        function updateSelectedVisaCount() {
+            const allChks = document.querySelectorAll('.visa-select-chk');
+            const checkedChks = document.querySelectorAll('.visa-select-chk:checked');
+            const counter = document.getElementById('visa-selected-counter');
+            if (counter) counter.innerText = `${checkedChks.length} of ${allChks.length} Selected`;
+
+            const masterChk = document.getElementById('visa-master-select');
+            if (masterChk) {
+                masterChk.checked = (allChks.length > 0 && checkedChks.length === allChks.length);
+            }
+        }
+
+        function toggleSelectAllVisa(masterChk) {
+            const isChecked = masterChk.checked;
+            document.querySelectorAll('.visa-select-chk').forEach(chk => {
+                chk.checked = isChecked;
+            });
+            updateSelectedVisaCount();
+        }
+
+        async function fetchVisaInstruments(forceRefresh = false) {
+            const listEl = document.getElementById('visa-instruments-list');
+            const counter = document.getElementById('visa-selected-counter');
+            listEl.innerHTML = `<div class="text-slate-500 italic font-mono text-xs">Scanning VISA Hardware Bus...</div>`;
+
+            try {
+                const res = await fetch('/api/scan');
+                if (!res.ok) throw new Error("Hardware scan failed");
+                const data = await res.json();
+                const instruments = Array.isArray(data) ? data : (data.all_instruments || data.devices || []);
+
+                if (instruments.length === 0) {
+                    listEl.innerHTML = `<div class="text-amber-400 font-semibold p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-xs">No active VISA hardware resources found.</div>`;
+                    if (counter) counter.innerText = `0 Selected`;
+                    return;
+                }
+
+                listEl.innerHTML = '';
+                instruments.forEach(inst => {
+                    const el = document.createElement('div');
+                    const visaAddr = inst.visa_address || inst.address || '';
+                    const isMock = visaAddr.toUpperCase().startsWith("MOCK::");
+                    const badgeColor = isMock ? 'bg-cyber-indigo/10 text-cyber-indigo border-cyber-indigo/30' : 'bg-cyber-emerald/10 text-cyber-emerald border-cyber-emerald/30';
+                    const idnStr = inst.idn || inst.idn_response || inst.description || 'No IDN response';
+                    
+                    el.className = 'bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-white/5 rounded-xl p-3.5 flex items-start space-x-3 hover:border-cyber-emerald/40 transition shadow-sm';
+                    el.innerHTML = `
+                        <input type="checkbox" class="visa-select-chk mt-0.5 rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-emerald focus:ring-0 w-4 h-4 cursor-pointer" data-visa="${escapeHtml(visaAddr)}" data-idn="${escapeHtml(idnStr)}" onchange="updateSelectedVisaCount()" checked>
+                        <div class="flex-grow flex flex-col space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="font-mono font-bold text-slate-800 dark:text-slate-100 text-xs">${escapeHtml(visaAddr)}</span>
+                                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${badgeColor}">${isMock ? 'MOCK EMULATOR' : 'PHYSICAL HARDWARE'}</span>
+                            </div>
+                            <div class="text-xs text-slate-600 dark:text-slate-300 font-mono flex items-start space-x-2">
+                                <span class="text-slate-400 dark:text-slate-500 shrink-0">*IDN?:</span>
+                                <span class="text-teal-700 dark:text-cyber-teal font-medium">${escapeHtml(idnStr)}</span>
+                            </div>
+                        </div>
+                    `;
+                    listEl.appendChild(el);
+                });
+                updateSelectedVisaCount();
+            } catch (err) {
+                listEl.innerHTML = `<div class="text-rose-400 font-semibold p-3 bg-rose-500/10 rounded-xl border border-rose-500/20 text-xs">Error scanning VISA bus: ${err.message}</div>`;
+            }
+        }
+
+        async function autoAssignSelectedVisa() {
+            const selectedChks = document.querySelectorAll('.visa-select-chk:checked');
+            if (selectedChks.length === 0) {
+                alert("Please check at least one instrument from the list to auto-assign.");
+                return;
+            }
+
+            alert("Note: GPIB Address 0 will not be used for auto-assignment for controller compatibility reasons.");
+
+            const forceOverwrite = document.getElementById('visa-force-overwrite')?.checked || false;
+            const assignedSlots = [];
+            const mappings = appState.mappings;
+
+            let currentSlot = 1;
+            function getNextAvailableSlot() {
+                while (currentSlot <= 30) {
+                    if (forceOverwrite || !mappings[currentSlot.toString()]) {
+                        const found = currentSlot;
+                        currentSlot++;
+                        return found;
+                    }
+                    currentSlot++;
+                }
+                return null;
+            }
+
+            for (const chk of selectedChks) {
+                const visaAddr = chk.getAttribute('data-visa');
+                const idnPattern = chk.getAttribute('data-idn');
+                
+                // If not forcing overwrite, check if already mapped
+                if (!forceOverwrite) {
+                    const alreadyMappedSlot = Object.keys(mappings).find(k => mappings[k] && mappings[k].visa_address === visaAddr);
+                    if (alreadyMappedSlot) {
+                        console.log(`Instrument ${visaAddr} is already mapped to Slot ${alreadyMappedSlot}`);
+                        continue;
+                    }
+                }
+
+                const slot = getNextAvailableSlot();
+                if (slot === null) {
+                    alert(`Reached maximum virtual GPIB address slot (30). Assigned ${assignedSlots.length} instruments.`);
+                    break;
+                }
+
+                let desc = idnPattern;
+                if (idnPattern.includes(",")) {
+                    const parts = idnPattern.split(",");
+                    desc = `${parts[0].trim()} ${parts[1].trim()}`;
+                }
+
+                try {
+                    const res = await fetch(`/api/mappings/${slot}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            visa_address: visaAddr,
+                            idn_pattern: idnPattern,
+                            description: desc
+                        })
+                    });
+                    if (res.ok) {
+                        assignedSlots.push(slot);
+                        mappings[slot.toString()] = { visa_address: visaAddr, idn_pattern: idnPattern, description: desc };
+                    }
+                } catch (err) {
+                    console.error(`Failed to map ${visaAddr} to Slot ${slot}:`, err);
+                }
+            }
+
+            if (assignedSlots.length > 0) {
+                appendConsoleMessage('SYSTEM', `Auto-assigned ${assignedSlots.length} selected VISA instrument(s) to virtual slot(s): ${assignedSlots.join(', ')}`);
+                fetchState();
+                visaModal.classList.add('hidden');
+            } else {
+                alert("All selected instruments are already mapped to virtual slots. Check 'Force Overwrite Existing Mappings' to reassign them.");
+            }
+        }
+
+        if (btnOpenVisa) {
+            btnOpenVisa.onclick = () => {
+                visaModal.classList.remove('hidden');
+                fetchVisaInstruments();
+            };
+        }
+
+        if (btnCloseVisa) {
+            btnCloseVisa.onclick = () => visaModal.classList.add('hidden');
+        }
+
+        visaModal.onclick = (e) => {
+            if (e.target === visaModal) visaModal.classList.add('hidden');
+        };
+
+        // Copy buttons
+        document.getElementById('btn-copy-gpib').onclick = () => {
+            const txt = document.getElementById('tc-gpib-text');
+            txt.select();
+            navigator.clipboard.writeText(txt.value);
+            appendConsoleMessage('SYSTEM', 'Copied settingsGPIB.txt to clipboard.');
+        };
+
+        document.getElementById('btn-copy-load').onclick = () => {
+            const txt = document.getElementById('tc-load-text');
+            txt.select();
+            navigator.clipboard.writeText(txt.value);
+            appendConsoleMessage('SYSTEM', 'Copied settingsLoad.txt to clipboard.');
+        };
+
+        // Download buttons
+        document.getElementById('btn-download-tc-gpib').onclick = () => {
+            const content = document.getElementById('tc-gpib-text').value;
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'settingsGPIB.txt';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            appendConsoleMessage('SYSTEM', 'Downloaded settingsGPIB.txt');
+        };
+
+        document.getElementById('btn-download-tc-load').onclick = () => {
+            const content = document.getElementById('tc-load-text').value;
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'settingsLoad.txt';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            appendConsoleMessage('SYSTEM', 'Downloaded settingsLoad.txt');
+        };
+
+        // Backup Download Controller
+        document.getElementById('btn-download-backup').onclick = async () => {
+            try {
+                const res = await fetch('/api/config/backup');
+                if (!res.ok) throw new Error("Could not fetch backup file");
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `prolog_emulator_backup_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                appendConsoleMessage('SYSTEM', 'Backup JSON file generated and downloaded successfully.');
+            } catch (err) {
+                appendConsoleMessage('ERROR', `Backup failed: ${err.message}`, true);
+            }
+        };
+
+        // Backup Upload & Restore Controller
+        const triggerUploadBtn = document.getElementById('btn-trigger-upload');
+        const fileInput = document.getElementById('backup-file-input');
+
+        triggerUploadBtn.onclick = () => {
+            fileInput.click();
+        };
+
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const configData = JSON.parse(event.target.result);
+                    const res = await fetch('/api/config/restore', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(configData)
+                    });
+                    const resData = await res.json();
+                    if (res.ok) {
+                        appendConsoleMessage('SYSTEM', `Configuration restored successfully! Loaded mappings for ${Object.keys(resData.mappings).length} slots.`);
+                        closeAdminDrawer();
+                        fetchState();
+                    } else {
+                        appendConsoleMessage('ERROR', `Restore failed: ${resData.detail}`, true);
+                        alert(`Restore failed: ${resData.detail}`);
+                    }
+                } catch (err) {
+                    appendConsoleMessage('ERROR', `Restore parsing error: ${err.message}`, true);
+                    alert(`Invalid backup JSON file: ${err.message}`);
+                }
+            };
+            reader.readAsText(file);
+            fileInput.value = '';
+        };
+
+        // Dedicated Instrument SCPI Console Controller
+        let consoleModalAddress = null;
+
+        function openInstrumentConsole(addr) {
+            consoleModalAddress = addr;
+            document.getElementById('console-modal-addr').innerText = addr;
+            
+            const mapping = appState.mappings[addr.toString()];
+            if (mapping) {
+                document.getElementById('console-modal-desc').innerText = `${mapping.description || 'Device'} (${mapping.visa_address})`;
+            } else {
+                document.getElementById('console-modal-desc').innerText = 'Unmapped Device';
+            }
+
+            // Clear and initialize console feed
+            const feed = document.getElementById('console-modal-feed');
+            feed.innerHTML = `<div class="text-slate-500 italic">SCPI Terminal initialized to Address ${addr}. Enter raw commands or query codes below...</div>`;
+            
+            // Show modal
+            const consoleModal = document.getElementById('console-modal');
+            consoleModal.classList.remove('hidden');
+            document.getElementById('console-modal-input').focus();
+        }
+
+        document.getElementById('console-modal-close').onclick = () => {
+            document.getElementById('console-modal').classList.add('hidden');
+            consoleModalAddress = null;
+        };
+
+        async function sendQuickCommand(cmd) {
+            document.getElementById('console-modal-input').value = cmd;
+            document.getElementById('console-modal-form').dispatchEvent(new Event('submit'));
+        }
+
+        document.getElementById('console-modal-form').onsubmit = async (e) => {
+            e.preventDefault();
+            if (consoleModalAddress === null) return;
+
+            const input = document.getElementById('console-modal-input');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+
+            // Append command to modal console feed
+            appendModalConsoleMessage('CMD', cmd);
+            input.value = '';
+
+            try {
+                const res = await fetch('/api/send_command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        command: cmd,
+                        virtual_address: consoleModalAddress
+                    })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    appendModalConsoleMessage('RESP', data.response);
+                } else {
+                    appendModalConsoleMessage('ERROR', data.detail, true);
+                }
+            } catch (err) {
+                appendModalConsoleMessage('ERROR', `Connection failed: ${err}`, true);
+            }
+        };
+
+        function appendModalConsoleMessage(source, text, isError = false) {
+            const feed = document.getElementById('console-modal-feed');
+            const el = document.createElement('div');
+            
+            let color = 'text-slate-300';
+            if (source === 'CMD') color = 'text-cyber-amber';
+            else if (source === 'RESP') color = 'text-cyber-teal';
+            else if (source === 'SYSTEM') color = 'text-cyber-indigo italic font-semibold';
+            
+            if (isError) color = 'text-cyber-rose font-bold';
+
+            el.className = 'text-xs font-mono';
+            el.innerHTML = `<span class="${color}">[${source}]</span> <span class="text-slate-100">${text}</span>`;
+            
+            feed.appendChild(el);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        // Live Instrument Snoop Monitor Controller
+        let snoopAddress = null;
+        let snoopPaused = false;
+        let snoopTimer = null;
+        let knownSnoopLogHashes = new Set();
+
+        function openSnoopMonitor(addr) {
+            snoopAddress = addr;
+            snoopPaused = false;
+            knownSnoopLogHashes.clear();
+            
+            document.getElementById('snoop-modal-addr').innerText = addr;
+            
+            const mapping = appState.mappings[addr.toString()];
+            if (mapping) {
+                document.getElementById('snoop-modal-desc').innerText = `${mapping.description || 'Device'} (${mapping.visa_address})`;
+            } else {
+                document.getElementById('snoop-modal-desc').innerText = 'Unmapped Device';
+            }
+
+            // Reset UI status & feed
+            document.getElementById('btn-snoop-pause').innerText = 'Pause Stream';
+            document.getElementById('snoop-stream-status').innerText = 'Active Snoop Stream';
+            
+            const feed = document.getElementById('snoop-modal-feed');
+            feed.innerHTML = `<div class="text-slate-500 italic">Connecting snoop stream for address ${addr}... Waiting for instrument transactions...</div>`;
+
+            // Open modal
+            document.getElementById('snoop-modal').classList.remove('hidden');
+
+            // Immediately poll first batch
+            pollSnoopData();
+
+            // Set up fast polling interval
+            if (snoopTimer) clearInterval(snoopTimer);
+            snoopTimer = setInterval(pollSnoopData, 1000);
+        }
+
+        function closeSnoopMonitor() {
+            document.getElementById('snoop-modal').classList.add('hidden');
+            if (snoopTimer) {
+                clearInterval(snoopTimer);
+                snoopTimer = null;
+            }
+            snoopAddress = null;
+        }
+
+        document.getElementById('snoop-modal-close').onclick = () => {
+            closeSnoopMonitor();
+        };
+
+        // Close modal on click outside content
+        document.getElementById('snoop-modal').onclick = (e) => {
+            if (e.target === document.getElementById('snoop-modal')) {
+                closeSnoopMonitor();
+            }
+        };
+
+        async function pollSnoopData() {
+            if (snoopAddress === null || snoopPaused) return;
+
+            try {
+                const res = await fetch(`/api/snoop/${snoopAddress}`);
+                if (!res.ok) return;
+                
+                const logs = await res.json();
+                const feed = document.getElementById('snoop-modal-feed');
+                
+                let hasNewLogs = false;
+                
+                logs.forEach(log => {
+                    // Create a unique hash for each log based on timestamp, category, and message
+                    const logHash = `${log.timestamp}_${log.category}_${log.message}`;
+                    if (!knownSnoopLogHashes.has(logHash)) {
+                        knownSnoopLogHashes.add(logHash);
+                        hasNewLogs = true;
+                        
+                        // Clear the "Connecting..." placeholder on first actual log
+                        if (feed.querySelector('.italic')) {
+                            feed.innerHTML = '';
+                        }
+                        
+                        const el = document.createElement('div');
+                        el.className = 'text-xs font-mono py-0.5 border-b border-white/[0.02] flex flex-col md:flex-row md:items-start md:space-x-2';
+                        
+                        let catColor = 'text-slate-400';
+                        if (log.category === 'INSTR_WRITE') catColor = 'text-cyber-indigo';
+                        else if (log.category === 'INSTR_READ') catColor = 'text-cyber-teal';
+                        else if (log.category === 'CONSOLE') catColor = 'text-cyber-amber';
+                        else if (log.level === 'ERROR') catColor = 'text-cyber-rose font-bold';
+                        
+                        el.innerHTML = `
+                            <span class="text-slate-500 shrink-0 select-none">[${log.timestamp.split(' ')[1]}]</span>
+                            <span class="${catColor} font-semibold shrink-0 select-none">[${log.category}]</span>
+                            <span class="text-slate-100 break-all">${escapeHtml(log.message)}</span>
+                        `;
+                        feed.appendChild(el);
+                    }
+                });
+                
+                if (hasNewLogs) {
+                    feed.scrollTop = feed.scrollHeight;
+                }
+            } catch (err) {
+                console.error("Failed to poll snoop data:", err);
+            }
+        }
+
+        function toggleSnoopPause() {
+            snoopPaused = !snoopPaused;
+            const btn = document.getElementById('btn-snoop-pause');
+            const status = document.getElementById('snoop-stream-status');
+            
+            if (snoopPaused) {
+                btn.innerText = 'Resume Stream';
+                btn.classList.add('border-cyber-teal', 'text-cyber-teal');
+                status.innerText = 'Snoop Stream Paused';
+            } else {
+                btn.innerText = 'Pause Stream';
+                btn.classList.remove('border-cyber-teal', 'text-cyber-teal');
+                status.innerText = 'Active Snoop Stream';
+                pollSnoopData(); // immediately catch up
+            }
+        }
+
+        function clearSnoopFeed() {
+            const feed = document.getElementById('snoop-modal-feed');
+            feed.innerHTML = `<div class="text-slate-500 italic">Feed cleared. Waiting for new instrument transactions...</div>`;
+        }
+
+        function escapeHtml(str) {
+            return str
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Re-filter logs instantly when any filter checkbox is toggled
+        document.getElementById('filter-log-sys').onchange = () => fetchLogs();
+        document.getElementById('filter-log-visa').onchange = () => fetchLogs();
+        document.getElementById('filter-log-traffic').onchange = () => fetchLogs();
+
+        // Initialize state syncing on load
+        fetchState();
+        fetchLogs();
+
+        // Perform an initial background scan to auto-populate the mapping dropdown list
+        async function performBackgroundScan() {
+            try {
+                const res = await fetch('/api/scan');
+                if (res.ok) {
+                    scannedDevices = await res.json();
+                    populateDiscoveredDropdown();
+                }
+            } catch (err) {
+                console.error("Initial background scan failed:", err);
+            }
+        }
+        performBackgroundScan();
+
+        // Fast Polling loops
+        setInterval(fetchState, 1500);
+        setInterval(fetchLogs, 800);
+    </script>
+</body>
+</html>
