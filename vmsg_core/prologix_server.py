@@ -1,10 +1,13 @@
 import asyncio
 import socket
+import re
 import time
 from typing import Dict, Any, Optional
 from .config_manager import ConfigManager
 from .visa_manager import VisaManager
 from .logger import logger
+
+_SESSION_ONLY = {"last_query_addr"}
 
 class PrologixSocketServer:
     """Asynchronous TCP Socket Server running on Port 1234 that implements the VISA Mapping TCP/IP Socket Gateway (VMSG) with Prologix Ethernet compatible control."""
@@ -19,19 +22,22 @@ class PrologixSocketServer:
         self.client_sessions: Dict[tuple, Dict[str, Any]] = {}
         self.is_running = False
 
-    def get_client_setting(self, client_addr: tuple, key: str) -> Any:
+    def get_client_setting(self, client_addr: tuple, key: str, default: Any = None) -> Any:
         """Gets a setting value specific to a TCP client connection session."""
         if client_addr in self.client_sessions and key in self.client_sessions[client_addr]:
             return self.client_sessions[client_addr][key]
-        return self.config.get_setting(key)
+        return self.config.get_setting(key, default)
+
 
     def set_client_setting(self, client_addr: tuple, key: str, value: Any) -> None:
-        """Sets a setting value specific to a TCP client connection session while updating global defaults."""
+        """Sets a setting value specific to a TCP client session without causing disk I/O for session-only keys."""
         if client_addr not in self.client_sessions:
             self.client_sessions[client_addr] = self.config.get_settings().copy()
         self.client_sessions[client_addr][key] = value
-        # Also update global config settings for UI display
-        self.config.update_setting(key, value)
+        if key in _SESSION_ONLY:
+            return
+        # Update runtime config in-memory for UI visibility without forcing immediate disk write
+        self.config.set_runtime_setting(key, value)
 
     async def start(self) -> None:
         """Starts the TCP socket server."""
@@ -40,13 +46,11 @@ class PrologixSocketServer:
             self.handle_client, self.host, self.port,
             reuse_address=True
         )
-        # Apply TCP_NODELAY (disable Nagle's) on the listening socket
         sock = self.server.sockets[0]
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         
         logger.info("SOCKET_SERVER", f"VMSG TCP Socket Server started on {self.host}:{self.port} (Prologix compatible)")
         
-        # Keep running
         try:
             async with self.server:
                 await self.server.serve_forever()
@@ -61,13 +65,11 @@ class PrologixSocketServer:
         if self.server:
             self.server.close()
             
-            # Cancel all active client tasks
             for task in list(self.active_tasks):
                 if not task.done():
                     task.cancel()
             
             try:
-                # Wait with timeout to prevent hanging
                 await asyncio.wait_for(self.server.wait_closed(), timeout=1.0)
             except asyncio.TimeoutError:
                 logger.warning("SOCKET_SERVER", "Socket server shutdown timed out.")
@@ -93,12 +95,10 @@ class PrologixSocketServer:
         self.active_connections.add(client_address)
         self.client_sessions[client_address] = self.config.get_settings().copy()
 
-        # Track the active task for cancellation on stop
         current_task = asyncio.current_task()
         if current_task:
             self.active_tasks.add(current_task)
 
-        # Disable Nagle's algorithm on the client socket to optimize latency
         try:
             sock = writer.get_extra_info('socket')
             if sock:
@@ -111,14 +111,16 @@ class PrologixSocketServer:
             while self.is_running:
                 data = await reader.read(4096)
                 if not data:
-                    # Client closed connection
                     break
 
                 buffer += data.decode('utf-8', errors='replace')
                 
-                # Process lines as they arrive (terminated by LF or CR+LF)
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
+                # Split commands on CR, LF, or CR+LF
+                lines = re.split(r'\r\n|\n|\r', buffer)
+                # Keep remaining incomplete line in buffer
+                buffer = lines.pop()
+
+                for line in lines:
                     line = line.strip()
                     if not line:
                         continue
@@ -153,14 +155,12 @@ class PrologixSocketServer:
         logger.info("TRAFFIC_IN", f"[{client_addr[0]}:{client_addr[1]}] -> {line}")
         
         if line.startswith("++"):
-            # Process Prologix configuration commands
             parts = line[2:].strip().split(None, 1)
             cmd = parts[0].lower()
             arg = parts[1].strip() if len(parts) > 1 else None
             
             return await self.execute_prologix_cmd(cmd, arg, client_addr)
         else:
-            # Process regular instrument (SCPI) commands
             return await self.route_instrument_cmd(line, client_addr)
 
     async def execute_prologix_cmd(self, cmd: str, arg: Optional[str], client_addr: tuple) -> Optional[str]:
@@ -169,18 +169,17 @@ class PrologixSocketServer:
         # 1. ++addr (GPIB Address)
         if cmd == "addr":
             if arg is None:
-                # Query per-client active address
                 return f"{self.get_client_setting(client_addr, 'addr')}\r\n"
             else:
                 try:
-                    val = int(arg)
+                    val = int(arg.split()[0])
                     if 0 <= val <= 30:
                         self.set_client_setting(client_addr, "addr", val)
                         logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Selected virtual address changed to {val}")
                         return None
-                    return "Error: Address must be 0 to 30\r\n"
+                    return None
                 except ValueError:
-                    return "Error: Invalid address format\r\n"
+                    return None
 
         # 2. ++auto (Read-After-Write)
         elif cmd == "auto":
@@ -217,9 +216,9 @@ class PrologixSocketServer:
                         self.set_client_setting(client_addr, "eos", val)
                         logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] EOS terminator set to {val}")
                         return None
-                    return "Error: EOS must be 0, 1, 2, or 3\r\n"
+                    return None
                 except ValueError:
-                    return "Error: Invalid EOS format\r\n"
+                    return None
 
         # 6. ++eoi (Assert EOI)
         elif cmd == "eoi":
@@ -241,9 +240,9 @@ class PrologixSocketServer:
                         self.set_client_setting(client_addr, "read_tmo_ms", val)
                         logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Read timeout set to {val} ms")
                         return None
-                    return "Error: Timeout must be > 0\r\n"
+                    return None
                 except ValueError:
-                    return "Error: Invalid timeout format\r\n"
+                    return None
 
         # 8. ++eot_enable (Append char on EOI)
         elif cmd == "eot_enable":
@@ -264,17 +263,51 @@ class PrologixSocketServer:
                     if 0 <= val <= 255:
                         self.set_client_setting(client_addr, "eot_char", val)
                         return None
-                    return "Error: EOT char must be 0 to 255\r\n"
+                    return None
                 except ValueError:
-                    return "Error: Invalid EOT char format\r\n"
+                    return None
 
         # 10. ++read (Perform manual read from device)
         elif cmd == "read":
-            # Determine read completion rule based on arguments
-            # Prologix support: ++read, ++read eoi, ++read <char>
             return await self.perform_instrument_read(client_addr)
 
-        # 11. ++rst (Reset configurations to defaults)
+        # 11. ++clr (Device Clear)
+        elif cmd == "clr":
+            curr_addr = self.get_client_setting(client_addr, "addr")
+            mapping = self.config.get_mapping(curr_addr)
+            if mapping and mapping.get("visa_address"):
+                visa_addr = mapping["visa_address"]
+                def _exec_clear():
+                    try:
+                        res, res_lock = self.visa_manager.get_resource(visa_addr)
+                        with res_lock:
+                            if hasattr(res, "clear"):
+                                res.clear()
+                    except Exception as e:
+                        logger.warning("SOCKET_SERVER", f"Clear failed on {visa_addr}: {e}")
+                await asyncio.to_thread(_exec_clear)
+            return None
+
+        # 12. ++trg (Group Execute Trigger)
+        elif cmd == "trg":
+            curr_addr = self.get_client_setting(client_addr, "addr")
+            mapping = self.config.get_mapping(curr_addr)
+            if mapping and mapping.get("visa_address"):
+                visa_addr = mapping["visa_address"]
+                def _exec_trg():
+                    try:
+                        res, res_lock = self.visa_manager.get_resource(visa_addr)
+                        with res_lock:
+                            if hasattr(res, "assert_trigger"):
+                                res.assert_trigger()
+                            else:
+                                res.write("*TRG")
+                    except Exception as e:
+                        logger.warning("SOCKET_SERVER", f"Trigger failed on {visa_addr}: {e}")
+                await asyncio.to_thread(_exec_trg)
+            return None
+
+        # 13. ++rst (Reset configurations to defaults)
         elif cmd == "rst":
             defaults = {
                 "addr": 1,
@@ -291,27 +324,16 @@ class PrologixSocketServer:
             logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Reset settings to Prologix factory defaults.")
             return None
 
-        # 12. ++lon (Listen Only Mode)
-        elif cmd == "lon":
+        # 14. ++lon, ++savecfg, ++llo, ++loc, ++ifc (Prologix state flags)
+        elif cmd in ["lon", "savecfg", "llo", "loc", "ifc"]:
             if arg is None:
-                return f"{self.get_client_setting(client_addr, 'lon')}\r\n"
+                return f"{self.get_client_setting(client_addr, cmd, 0)}\r\n"
             else:
                 val = 1 if arg in ["1", "on", "true"] else 0
-                self.set_client_setting(client_addr, "lon", val)
-                logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Listen-only mode set to {val}")
+                self.set_client_setting(client_addr, cmd, val)
                 return None
 
-        # 13. ++savecfg (Save configuration toggle / no-op)
-        elif cmd == "savecfg":
-            if arg is None:
-                return f"{self.get_client_setting(client_addr, 'savecfg')}\r\n"
-            else:
-                val = 1 if arg in ["1", "on", "true"] else 0
-                self.set_client_setting(client_addr, "savecfg", val)
-                logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Auto-save configuration set to {val}")
-                return None
-
-        # 14. ++spoll (Serial poll)
+        # 15. ++spoll (Serial poll)
         elif cmd == "spoll":
             if arg is None:
                 addr_to_poll = self.get_client_setting(client_addr, "addr")
@@ -319,15 +341,15 @@ class PrologixSocketServer:
                 try:
                     addr_to_poll = int(arg)
                 except ValueError:
-                    return "Error: Invalid address format for spoll\r\n"
+                    return None
 
             if not (0 <= addr_to_poll <= 30):
-                return "Error: Address must be 0 to 30 for spoll\r\n"
+                return None
 
             stb_val = await self.perform_serial_poll(addr_to_poll)
             return f"{stb_val}\r\n"
 
-        # 15. ++help (Help text)
+        # 16. ++help (Help text)
         elif cmd == "help":
             help_text = (
                 "Prologix Emulator Command Help:\r\n"
@@ -335,24 +357,24 @@ class PrologixSocketServer:
                 "  ++auto [0|1]          Set/Query read-after-write auto mode\r\n"
                 "  ++mode [0|1]          Set/Query mode (0=Device, 1=Controller)\r\n"
                 "  ++read [eoi|<char>]   Read response from current instrument\r\n"
+                "  ++clr                 Send Selected Device Clear\r\n"
+                "  ++trg                 Send Group Execute Trigger (*TRG)\r\n"
                 "  ++ver                 Query Prologix controller version\r\n"
                 "  ++eos [0|1|2|3]       Set/Query EOS formatting (0=CR+LF, 1=CR, 2=LF, 3=None)\r\n"
                 "  ++eoi [0|1]           Set/Query whether to assert EOI line\r\n"
                 "  ++read_tmo_ms <ms>    Set/Query timeout in milliseconds\r\n"
                 "  ++eot_enable [0|1]    Set/Query appending of EOT char on EOI\r\n"
                 "  ++eot_char <0-255>    Set/Query character ASCII to append on EOI\r\n"
-                "  ++lon [0|1]           Set/Query listen only mode\r\n"
-                "  ++savecfg [0|1]       Set/Query automatic config saving\r\n"
                 "  ++spoll [<0-30>]      Perform serial poll on instrument\r\n"
                 "  ++rst                 Reset configuration to defaults\r\n"
                 "  ++help                Display this command list\r\n"
             )
             return help_text
 
-        # Unknown commands
+        # Unknown commands: silently log without injecting error strings into client data stream
         else:
             logger.warning("SOCKET_SERVER", f"Received unknown command: ++{cmd}")
-            return f"Error: Unknown command ++{cmd}\r\n"
+            return None
 
     async def route_instrument_cmd(self, command: str, client_addr: tuple) -> Optional[str]:
         """Routes regular instrument command to physical/mock instrument."""
@@ -366,30 +388,26 @@ class PrologixSocketServer:
 
         if not mapping:
             if unmapped_behavior == "timeout":
-                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Addressing unmapped virtual slot {curr_addr}. Simulating typical GPIB physical bus timeout (blocking for {read_tmo_ms} ms)...")
+                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Addressing unmapped virtual slot {curr_addr}. Simulating typical GPIB timeout...")
                 await asyncio.sleep(read_tmo_ms / 1000.0)
-                return "Error: VI_ERROR_TMO (-1073807339): Timeout expired before operation completed.\r\n"
+                return "\r\n"
             else:
-                msg = f"No instrument mapped to virtual address {curr_addr}."
-                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] {msg}")
-                return f"Error: {msg}\r\n"
+                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] No instrument mapped to virtual address {curr_addr}.")
+                return None
 
         visa_addr = mapping.get("visa_address")
         if not visa_addr:
-            msg = f"Empty VISA address configured for address {curr_addr}."
-            logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] {msg}")
-            return f"Error: {msg}\r\n"
+            return None
 
-        # Route write in a thread to keep socket event loop unblocked
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Failed to acquire connection to {visa_addr}: {e}")
             return f"Error: Connection to physical instrument failed ({e})\r\n"
 
-        # Apply EOS setting to the sent command
         eos_terminator = self._get_eos_terminator(eos_val)
         command_with_term = command + eos_terminator
+        interface_lock = self.visa_manager.get_interface_lock(visa_addr)
 
         def _execute_write():
             is_mock = visa_addr.upper().startswith("MOCK::")
@@ -397,35 +415,35 @@ class PrologixSocketServer:
                 with res_lock:
                     res.write(command_with_term)
             else:
-                with self.visa_manager.global_visa_lock:
+                with interface_lock:
                     with res_lock:
                         res.write(command_with_term)
 
         try:
             logger.info("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Sending to {visa_addr} (Addr {curr_addr}): {repr(command_with_term)}")
             await asyncio.to_thread(_execute_write)
-            # Track which address received a query command so subsequent ++read reads from the exact queried instrument
             if "?" in command:
                 self.set_client_setting(client_addr, "last_query_addr", curr_addr)
         except Exception as e:
             logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Write failed to {visa_addr}: {e}")
             if not visa_addr.upper().startswith("MOCK::"):
-                try:
-                    with self.visa_manager.global_visa_lock:
-                        with res_lock:
-                            if hasattr(res, "clear"):
-                                res.clear()
-                except Exception:
-                    self.visa_manager.purge_resource(visa_addr)
-            return f"Error: Write failed to instrument ({e})\r\n"
+                def _cleanup():
+                    try:
+                        with interface_lock:
+                            with res_lock:
+                                if hasattr(res, "clear"):
+                                    res.clear()
+                    except Exception:
+                        self.visa_manager.purge_resource(visa_addr)
+                await asyncio.to_thread(_cleanup)
+            return None
 
-        # If auto read-after-write is enabled, read response immediately
         if auto_mode == 1:
             return await self.perform_instrument_read(client_addr)
 
         return None
 
-    async def perform_instrument_read(self, client_addr: tuple) -> str:
+    async def perform_instrument_read(self, client_addr: tuple) -> Optional[str]:
         """Performs a read operation on the currently addressed instrument and formats output."""
         query_addr = self.get_client_setting(client_addr, "last_query_addr")
         if query_addr is not None:
@@ -443,7 +461,7 @@ class PrologixSocketServer:
 
         if not mapping:
             if unmapped_behavior == "timeout":
-                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Read requested on unmapped virtual slot {curr_addr}. Simulating typical GPIB physical bus timeout (blocking for {read_tmo_ms} ms)...")
+                logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Read requested on unmapped virtual slot {curr_addr}. Simulating timeout...")
                 await asyncio.sleep(read_tmo_ms / 1000.0)
                 term = "\r\n"
                 if eot_enable == 1:
@@ -454,12 +472,14 @@ class PrologixSocketServer:
 
         visa_addr = mapping.get("visa_address", "")
         if not visa_addr:
-            return "Error: Empty VISA address\r\n"
+            return None
 
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             return f"Error: Connect failed ({e})\r\n"
+
+        interface_lock = self.visa_manager.get_interface_lock(visa_addr)
 
         def _execute_read():
             is_mock = visa_addr.upper().startswith("MOCK::")
@@ -467,20 +487,21 @@ class PrologixSocketServer:
                 with res_lock:
                     return res.read()
             else:
-                with self.visa_manager.global_visa_lock:
+                with interface_lock:
                     with res_lock:
                         return res.read()
 
         try:
-            # Read in thread to keep event loop unblocked
             response = await asyncio.to_thread(_execute_read)
             logger.info("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Read from {visa_addr} (Addr {curr_addr}): {repr(response)}")
             
-            # Format output line endings. Normalise incoming ending and apply appropriate Prologix formatting
-            response = response.strip()
-            
-            # Format the response depending on eot_enable and eot_char
-            term = "\r\n"  # Prologix Ethernet output delimiter
+            # Format output line endings
+            if response.endswith("\r\n"):
+                response = response[:-2]
+            elif response.endswith("\n") or response.endswith("\r"):
+                response = response[:-1]
+
+            term = "\r\n"
             if eot_enable == 1:
                 term = chr(eot_char) + term
                 
@@ -490,19 +511,19 @@ class PrologixSocketServer:
         except Exception as e:
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Read failed from {visa_addr}: {e}")
             if not visa_addr.upper().startswith("MOCK::"):
-                try:
-                    with res_lock:
-                        if hasattr(res, "clear"):
-                            res.clear()
-                except Exception:
-                    self.visa_manager.purge_resource(visa_addr)
-            # Return standard Prologix Ethernet empty string response on timeout
-            if "VI_ERROR_TMO" in str(e) or "Timeout" in str(e):
-                term = "\r\n"
-                if eot_enable == 1:
-                    term = chr(eot_char) + term
-                return term
-            return f"Error: Read failed from instrument ({e})\r\n"
+                def _cleanup():
+                    try:
+                        with res_lock:
+                            if hasattr(res, "clear"):
+                                res.clear()
+                    except Exception:
+                        self.visa_manager.purge_resource(visa_addr)
+                await asyncio.to_thread(_cleanup)
+                
+            term = "\r\n"
+            if eot_enable == 1:
+                term = chr(eot_char) + term
+            return term
 
     async def perform_serial_poll(self, address: int) -> int:
         """Performs a standard GPIB Serial Poll (reads STB) of the specified virtual address."""
@@ -515,10 +536,13 @@ class PrologixSocketServer:
 
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr)
+            interface_lock = self.visa_manager.get_interface_lock(visa_addr)
             def _execute_stb():
-                with res_lock:
-                    return res.read_stb()
+                with interface_lock:
+                    with res_lock:
+                        return res.read_stb()
             return await asyncio.to_thread(_execute_stb)
         except Exception as e:
             logger.warning("SOCKET_SERVER", f"Serial poll failed on virtual address {address} ({visa_addr}): {e}")
             return 0
+

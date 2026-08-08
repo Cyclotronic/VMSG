@@ -182,12 +182,14 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     continue
             
             # Apply settings & mappings
-            app.state.config.config["settings"] = data["settings"]
+            if isinstance(data.get("settings"), dict):
+                app.state.config.update_settings(data["settings"], persist=False)
+            
             app.state.config.config["mappings"] = restored_mappings
             app.state.config.save_config()
             
             # Dynamically propagate logging config to logger
-            logger.configure(data["settings"])
+            logger.configure(app.state.config.get_settings())
             
             logger.info("WEB_API", "Configuration successfully restored from uploaded JSON backup.")
             return {
@@ -522,8 +524,9 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
 
     # 6. Stream Live Logs
     @api.get("/logs")
-    def get_logs():
-        return logger.get_logs()
+    def get_logs(since: int = 0):
+        return logger.get_logs(since_id=since)
+
 
     @api.get("/snoop/{address}")
     def snoop_traffic(address: int):

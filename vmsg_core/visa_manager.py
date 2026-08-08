@@ -8,10 +8,11 @@ from pyvisa.errors import VisaIOError
 
 class MockVisaResource:
     """Simulates a physical instrument's response behavior for testing and out-of-the-box operation."""
-    def __init__(self, visa_address: str, idn_string: str = "Mock Instrument,Generic,1.0"):
+    def __init__(self, visa_address: str, idn_string: str = "Mock Instrument,Generic,1.0", delay_s: float = 0.0):
         self.visa_address = visa_address
         self.idn_string = idn_string
         self.timeout = 3000
+        self.delay_s = delay_s
         self._last_command = ""
         self.lock = threading.Lock()
         
@@ -32,8 +33,8 @@ class MockVisaResource:
         """Simulates writing a command."""
         with self.lock:
             self._last_command = command.strip()
-            # Simulate processing delay
-            time.sleep(0.005)
+            if self.delay_s > 0:
+                time.sleep(self.delay_s)
             return len(command)
 
     def read(self) -> str:
@@ -91,7 +92,8 @@ class VisaManager:
     """Manages active PyVISA connections, resource pooling, and auto-healing."""
     def __init__(self):
         self.lock = threading.Lock()
-        self.global_visa_lock = threading.Lock()  # Hardware bus serialization lock across parallel socket threads
+        self.global_visa_lock = threading.Lock()  # Hardware bus fallback lock
+        self.interface_locks: Dict[str, threading.Lock] = {}  # Per-interface lock (e.g. GPIB0, TCPIP0)
         self.resource_cache: Dict[str, Any] = {}
         self.resource_locks: Dict[str, threading.Lock] = {}
         self.unresponsive_cache: Dict[str, float] = {}  # visa_address -> last_fail_timestamp
@@ -115,6 +117,16 @@ class VisaManager:
             except Exception as e_py:
                 self.rm = None
                 print(f"[VisaManager] Error: Could not initialize any VISA ResourceManager: {e_py}")
+
+    def get_interface_lock(self, visa_address: str) -> threading.Lock:
+        """Retrieves or creates a lock specific to the hardware interface (e.g., GPIB0, USB0, TCPIP0)."""
+        if not visa_address:
+            return self.global_visa_lock
+        interface_key = visa_address.split("::", 1)[0].upper()
+        with self.lock:
+            if interface_key not in self.interface_locks:
+                self.interface_locks[interface_key] = threading.Lock()
+            return self.interface_locks[interface_key]
 
     def list_physical_resources(self) -> List[str]:
         """Lists connected physical VISA resources."""
@@ -242,16 +254,6 @@ class VisaManager:
                     self.unresponsive_cache[visa_address] = time.time()
             return None
 
-        if not res_lock:
-            try:
-                idn = res.query("*IDN?").strip()
-                return idn
-            except Exception:
-                if not is_mock:
-                    with self.unresponsive_lock:
-                        self.unresponsive_cache[visa_address] = time.time()
-                return None
-        
         with res_lock:
             try:
                 old_timeout = getattr(res, "timeout", timeout_ms)
@@ -273,7 +275,7 @@ class VisaManager:
                         self.unresponsive_cache.pop(visa_address, None)
                         
                 return idn
-            except Exception as e:
+            except Exception:
                 # Mark as unresponsive without spamming purge/reconnect
                 if not is_mock:
                     with self.unresponsive_lock:
@@ -321,12 +323,10 @@ class VisaManager:
         return discovered
 
     def heal_mappings(self, current_mappings: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
-
         """
         USB Lottery Healing:
-        Compares the expected IDN pattern for each mapped slot against all active connected devices.
-        If an expected device is missing at its mapped address, but found at a different address,
-        it heals the address mapping! Returns a list of healing actions taken.
+        Compares expected IDN patterns against active devices. Refuses ambiguous
+        healing if multiple online devices match the pattern.
         """
         healing_actions: List[Dict[str, Any]] = []
         if not current_mappings:
@@ -334,8 +334,7 @@ class VisaManager:
 
         # Step 1: Scan all connected hardware
         scanned_devices = self.scan_all_hardware()
-        # Create helper lookup of scanned online devices: IDN -> visa_address
-        scanned_online = [d for d in scanned_devices if d["status"] == "online"]
+        scanned_online = [d for d in scanned_devices if d["status"] == "online" and d["idn"]]
 
         # Step 2: Iterate through each mapped virtual slot
         for addr_str, mapping in current_mappings.items():
@@ -346,38 +345,36 @@ class VisaManager:
             if not idn_pattern:
                 continue
 
-            # Query current active address to see if the device is already happy there
+            # Query current active address
             current_idn = self.query_idn(expected_visa_addr, timeout_ms=1000)
             
-            # Check if current IDN satisfies the pattern
+            # Check if current IDN satisfies pattern
             if current_idn and idn_pattern.lower() in current_idn.lower():
-                # Device is present at its mapped address! No healing needed.
                 continue
 
-            # If device is missing or has a different IDN, look for where it might have gone!
-            found_new_address = None
-            found_idn = None
+            # Find matching online devices
+            matches = [
+                dev for dev in scanned_online
+                if idn_pattern.lower() in dev["idn"].lower()
+            ]
             
-            for dev in scanned_online:
-                dev_addr = dev["visa_address"]
-                dev_idn = dev["idn"]
-                
-                # Check if this device matches our pattern
-                if idn_pattern.lower() in dev_idn.lower():
-                    # We found a matching device!
-                    found_new_address = dev_addr
-                    found_idn = dev_idn
-                    break
-            
-            if found_new_address and found_new_address != expected_visa_addr:
-                # Perform the healing action details
-                healing_actions.append({
-                    "virtual_address": int(addr_str),
-                    "description": description,
-                    "idn_pattern": idn_pattern,
-                    "old_visa_address": expected_visa_addr,
-                    "new_visa_address": found_new_address,
-                    "matched_idn": found_idn
-                })
+            # Refuse ambiguous matches
+            if len(matches) > 1:
+                print(f"[VisaManager] Healing skipped for slot {addr_str}: IDN pattern '{idn_pattern}' matches multiple active devices.")
+                continue
+
+            if len(matches) == 1:
+                found_dev = matches[0]
+                found_new_address = found_dev["visa_address"]
+                if found_new_address != expected_visa_addr:
+                    healing_actions.append({
+                        "virtual_address": int(addr_str),
+                        "description": description,
+                        "idn_pattern": idn_pattern,
+                        "old_visa_address": expected_visa_addr,
+                        "new_visa_address": found_new_address,
+                        "matched_idn": found_dev["idn"]
+                    })
 
         return healing_actions
+
