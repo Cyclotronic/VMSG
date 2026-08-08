@@ -221,6 +221,14 @@
                         <input type="checkbox" id="set-auto-heal-usb" name="auto_heal_usb" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
                     </div>
 
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3 mt-1 text-xs">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Scan Serial/COM Ports</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Scan PyVISA ASRL serial ports during discovery (<code class="text-cyber-teal font-mono">scan_serial_ports</code>)</p>
+                        </div>
+                        <input type="checkbox" id="set-scan-serial-ports" name="scan_serial_ports" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
                     <button type="submit" class="w-full bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-sm font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 hover:shadow-cyber-teal/20 active:scale-[0.98] transition duration-150 mt-2">
                         Apply & Save Parameters
                     </button>
@@ -1133,6 +1141,9 @@
                     if (document.getElementById('set-auto-heal-usb')) {
                         document.getElementById('set-auto-heal-usb').checked = appState.settings.auto_heal_usb !== false;
                     }
+                    if (document.getElementById('set-scan-serial-ports')) {
+                        document.getElementById('set-scan-serial-ports').checked = !!appState.settings.scan_serial_ports;
+                    }
                     
                     // Sync logging parameters
                     document.getElementById('set-log-level').value = appState.settings.log_level || 'INFO';
@@ -1253,7 +1264,7 @@
             formData.forEach((value, key) => {
                 if (key === 'unmapped_behavior') {
                     payload[key] = value;
-                } else if (key === 'auto_heal_usb') {
+                } else if (key === 'auto_heal_usb' || key === 'scan_serial_ports') {
                     payload[key] = true;
                 } else {
                     payload[key] = parseInt(value);
@@ -1261,6 +1272,9 @@
             });
             if (!formData.has('auto_heal_usb')) {
                 payload['auto_heal_usb'] = false;
+            }
+            if (!formData.has('scan_serial_ports')) {
+                payload['scan_serial_ports'] = false;
             }
 
             try {

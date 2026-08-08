@@ -30,6 +30,8 @@ class SettingsModel(BaseModel):
     lon: Optional[int] = Field(None, ge=0, le=1)
     savecfg: Optional[int] = Field(None, ge=0, le=1)
     unmapped_behavior: Optional[str] = Field(None, description="Behavior for unmapped virtual addresses: 'message' or 'timeout'")
+    auto_heal_usb: Optional[bool] = Field(None, description="Toggle auto USB lottery healing")
+    scan_serial_ports: Optional[bool] = Field(None, description="Toggle PyVISA scanning of ASRL serial/COM ports")
     log_level: Optional[str] = Field(None, description="Logging verbosity (DEBUG, INFO, WARN, ERROR)")
     enable_stdout: Optional[bool] = Field(None, description="Toggle standard output console printing")
     log_category_traffic: Optional[bool] = Field(None, description="Toggle traffic logs")
@@ -143,11 +145,24 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             raise HTTPException(status_code=404, detail=f"No mapping found for address {address}")
 
     @api.delete("/mappings")
-    def clear_all_mappings():
+    def clear_all_mappings(confirm: bool = False):
+        if not confirm:
+            raise HTTPException(status_code=400, detail="Confirmation required to clear all mappings. Pass ?confirm=true")
         try:
             app.state.config.clear_all_mappings()
             logger.info("WEB_API", "Cleared all virtual address mappings")
             return {"status": "success", "message": "All virtual address mappings cleared."}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @api.post("/cooldown/clear")
+    def clear_cooldown():
+        """Clears the unresponsive resource cooldown cache."""
+        try:
+            with app.state.visa.unresponsive_lock:
+                app.state.visa.unresponsive_cache.clear()
+            logger.info("WEB_API", "Cleared unresponsive resource cooldown cache.")
+            return {"status": "success", "message": "Unresponsive cooldown cache cleared."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 

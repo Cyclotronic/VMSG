@@ -212,6 +212,8 @@ class VisaManager:
                 self.resource_cache[visa_address] = resource
                 self.pending_opens.pop(visa_address, None)
                 open_event.set()
+            with self.unresponsive_lock:
+                self.unresponsive_cache.pop(visa_address, None)
 
             logger.info("VISAMANAGER", f"Connected and cached physical resource: {visa_address}")
             return resource, res_lock
@@ -227,10 +229,16 @@ class VisaManager:
     async def async_get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
         """Asynchronously acquires resource with connect budget timeout off the main event loop."""
         connect_budget_s = min(5.0, (timeout_ms / 1000.0) + 2.0)
-        return await asyncio.wait_for(
-            asyncio.to_thread(self.get_resource, visa_address, timeout_ms),
-            timeout=connect_budget_s
-        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self.get_resource, visa_address, timeout_ms),
+                timeout=connect_budget_s
+            )
+        except asyncio.TimeoutError:
+            if not visa_address.upper().startswith("MOCK::"):
+                with self.unresponsive_lock:
+                    self.unresponsive_cache[visa_address] = time.time()
+            raise
 
     def purge_resource(self, visa_address: str) -> None:
         """Closes and removes a resource from cache (e.g., after a fatal connection error)."""
