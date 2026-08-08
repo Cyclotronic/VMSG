@@ -7,6 +7,8 @@ from .config_manager import ConfigManager
 from .visa_manager import VisaManager
 from .logger import logger
 
+from pyvisa.constants import RENLineOperation
+
 _SESSION_ONLY = {"last_query_addr", "savecfg", "llo", "loc", "ifc"}
 
 class PrologixSocketServer:
@@ -38,6 +40,15 @@ class PrologixSocketServer:
             return
         # Update runtime config in-memory for UI visibility without forcing immediate disk write
         self.config.set_runtime_setting(key, value)
+
+    def _empty_response(self, client_addr: tuple) -> str:
+        """The response a real Prologix emits when a read yields nothing (or times out)."""
+        eot_enable = self.get_client_setting(client_addr, "eot_enable", 0)
+        eot_char = self.get_client_setting(client_addr, "eot_char", 4)
+        term = "\r\n"
+        if eot_enable == 1:
+            term = chr(eot_char) + term
+        return term
 
     async def start(self) -> None:
         """Starts the TCP socket server."""
@@ -311,7 +322,7 @@ class PrologixSocketServer:
                 await asyncio.to_thread(_exec_trg)
             return None
 
-        # 13. ++llo, ++loc, ++ifc (GPIB Bus Control Actions - Always Return None)
+        # 13. ++llo, ++loc, ++ifc (GPIB Bus Control Actions)
         elif cmd in ["llo", "loc", "ifc"]:
             curr_addr = self.get_client_setting(client_addr, "addr")
             mapping = self.config.get_mapping(curr_addr)
@@ -325,9 +336,11 @@ class PrologixSocketServer:
                             with res_lock:
                                 if hasattr(res, "control_ren"):
                                     if cmd == "loc":
-                                        res.control_ren(1)  # Go To Local (GTL)
+                                        res.control_ren(RENLineOperation.address_gtl)
                                     elif cmd == "llo":
-                                        res.control_ren(3)  # Local Lockout (LLO)
+                                        res.control_ren(RENLineOperation.asrt_address_llo)
+                                elif cmd == "ifc":
+                                    logger.warning("SOCKET_SERVER", f"Interface Clear (IFC) not supported on backend for {visa_addr}")
                     except Exception as e:
                         logger.warning("SOCKET_SERVER", f"Bus action {cmd} failed on {visa_addr}: {e}")
                 await asyncio.to_thread(_exec_bus_action)
@@ -418,20 +431,20 @@ class PrologixSocketServer:
             if unmapped_behavior == "timeout":
                 logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Addressing unmapped virtual slot {curr_addr}. Simulating typical GPIB timeout...")
                 await asyncio.sleep(read_tmo_ms / 1000.0)
-                return "\r\n"
+                return self._empty_response(client_addr) if auto_mode == 1 else None
             else:
                 logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] No instrument mapped to virtual address {curr_addr}.")
-                return None
+                return self._empty_response(client_addr) if auto_mode == 1 else None
 
         visa_addr = mapping.get("visa_address")
         if not visa_addr:
-            return None
+            return self._empty_response(client_addr) if auto_mode == 1 else None
 
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Failed to acquire connection to {visa_addr}: {e}")
-            return None
+            return self._empty_response(client_addr) if auto_mode == 1 else None
 
         eos_terminator = self._get_eos_terminator(eos_val)
         command_with_term = command + eos_terminator
@@ -464,14 +477,14 @@ class PrologixSocketServer:
                     except Exception:
                         self.visa_manager.purge_resource(visa_addr)
                 await asyncio.to_thread(_cleanup)
-            return None
+            return self._empty_response(client_addr) if auto_mode == 1 else None
 
         if auto_mode == 1:
             return await self.perform_instrument_read(client_addr)
 
         return None
 
-    async def perform_instrument_read(self, client_addr: tuple) -> Optional[str]:
+    async def perform_instrument_read(self, client_addr: tuple) -> str:
         """Performs a read operation on the currently addressed instrument and formats output."""
         query_addr = self.get_client_setting(client_addr, "last_query_addr")
         if query_addr is not None:
@@ -491,22 +504,17 @@ class PrologixSocketServer:
             if unmapped_behavior == "timeout":
                 logger.warning("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Read requested on unmapped virtual slot {curr_addr}. Simulating timeout...")
                 await asyncio.sleep(read_tmo_ms / 1000.0)
-                term = "\r\n"
-                if eot_enable == 1:
-                    term = chr(eot_char) + term
-                return term
-            else:
-                return None
+            return self._empty_response(client_addr)
 
         visa_addr = mapping.get("visa_address", "")
         if not visa_addr:
-            return None
+            return self._empty_response(client_addr)
 
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Connection failed to {visa_addr}: {e}")
-            return None
+            return self._empty_response(client_addr)
 
         interface_lock = self.visa_manager.get_interface_lock(visa_addr)
 
@@ -549,10 +557,7 @@ class PrologixSocketServer:
                         self.visa_manager.purge_resource(visa_addr)
                 await asyncio.to_thread(_cleanup)
                 
-            term = "\r\n"
-            if eot_enable == 1:
-                term = chr(eot_char) + term
-            return term
+            return self._empty_response(client_addr)
 
     async def perform_serial_poll(self, address: int) -> int:
         """Performs a standard GPIB Serial Poll (reads STB) of the specified virtual address."""
