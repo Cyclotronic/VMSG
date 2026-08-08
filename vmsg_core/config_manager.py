@@ -39,7 +39,36 @@ class ConfigManager:
         self.filepath = filepath
         self.lock = threading.Lock()
         self.config = copy.deepcopy(DEFAULT_CONFIG)
+        self._dirty = threading.Event()
+        self._running = True
+        self._writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
+        self._writer_thread.start()
         self.load_config()
+
+    def _writer_loop(self) -> None:
+        """Background thread that coalesces config updates and writes atomically to disk."""
+        while self._running:
+            if self._dirty.wait(timeout=1.0):
+                self._dirty.clear()
+                # Coalesce rapid consecutive writes
+                import time
+                time.sleep(0.2)
+                self._write_to_disk_atomic()
+
+    def _write_to_disk_atomic(self) -> None:
+        """Helper to write configuration snapshot atomically to disk."""
+        try:
+            with self.lock:
+                config_snapshot = copy.deepcopy(self.config)
+            
+            tmp_path = self.filepath + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(config_snapshot, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.filepath)
+        except Exception as e:
+            print(f"[ConfigManager] Error atomically writing config to {self.filepath}: {e}")
 
     def load_config(self) -> None:
         """Loads configuration from JSON file. Creates default configuration if file does not exist."""
@@ -71,34 +100,24 @@ class ConfigManager:
             else:
                 self.config = copy.deepcopy(DEFAULT_CONFIG)
                 
-            self._save_config_unlocked()
-            # Ensure savecfg is initialized to 1 for VMSG operations
             self.config["settings"]["savecfg"] = 1
+            self._save_config_unlocked()
 
         # Propagate config settings to global logger
         logger.configure(self.config["settings"])
 
     def _save_config_unlocked(self) -> None:
-        """Saves configuration atomically to JSON file."""
-        try:
-            config_snapshot = copy.deepcopy(self.config)
-            filepath = self.filepath
-            def _disk_write():
-                try:
-                    with open(filepath, "w") as f:
-                        json.dump(config_snapshot, f, indent=4)
-                        f.flush()
-                except Exception as e:
-                    print(f"[ConfigManager] Error writing config to {filepath}: {e}")
-
-            threading.Thread(target=_disk_write, daemon=True).start()
-        except Exception as e:
-            print(f"[ConfigManager] Error preparing config write to {self.filepath}: {e}")
+        """Signals background writer thread that configuration needs persisting."""
+        self._dirty.set()
 
     def save_config(self) -> None:
         """Saves configuration to JSON file thread-safely."""
         with self.lock:
             self._save_config_unlocked()
+
+    def save_config_sync(self) -> None:
+        """Forces an immediate synchronous atomic write to disk (used during shutdown)."""
+        self._write_to_disk_atomic()
 
     def get_settings(self) -> Dict[str, Any]:
         """Gets a copy of the Prologix controller settings."""

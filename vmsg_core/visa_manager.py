@@ -98,6 +98,7 @@ class VisaManager:
         self.interface_locks: Dict[str, threading.Lock] = {}  # Per-interface lock (e.g. GPIB0, TCPIP0)
         self.resource_cache: Dict[str, Any] = {}
         self.resource_locks: Dict[str, threading.Lock] = {}
+        self.pending_opens: Dict[str, threading.Event] = {}
         self.unresponsive_cache: Dict[str, float] = {}  # visa_address -> last_fail_timestamp
         self.unresponsive_lock = threading.Lock()
         self.rm: Optional[pyvisa.ResourceManager] = None
@@ -148,53 +149,80 @@ class VisaManager:
         if not visa_address:
             raise ValueError("Empty VISA address")
 
-        with self.lock:
-            if visa_address not in self.resource_locks:
-                self.resource_locks[visa_address] = threading.Lock()
-            res_lock = self.resource_locks[visa_address]
+        while True:
+            with self.lock:
+                if visa_address not in self.resource_locks:
+                    self.resource_locks[visa_address] = threading.Lock()
+                res_lock = self.resource_locks[visa_address]
 
-            if visa_address in self.resource_cache:
-                resource = self.resource_cache[visa_address]
+                if visa_address in self.resource_cache:
+                    resource = self.resource_cache[visa_address]
+                    try:
+                        if hasattr(resource, "timeout"):
+                            resource.timeout = timeout_ms
+                    except Exception:
+                        pass
+                    return resource, res_lock
+
+                if visa_address.upper().startswith("MOCK::"):
+                    resource = MockVisaResource(visa_address)
+                    resource.timeout = timeout_ms
+                    self.resource_cache[visa_address] = resource
+                    logger.info("VISAMANAGER", f"Created cached Mock resource: {visa_address}")
+                    return resource, res_lock
+
+                if visa_address in self.pending_opens:
+                    open_event = self.pending_opens[visa_address]
+                else:
+                    open_event = threading.Event()
+                    self.pending_opens[visa_address] = open_event
+                    break  # This thread will perform open_resource
+
+            open_event.wait(timeout=5.0)
+
+        if not self.rm:
+            with self.lock:
+                self.pending_opens.pop(visa_address, None)
+                open_event.set()
+            raise RuntimeError("No VISA ResourceManager available to connect to physical hardware.")
+
+        try:
+            resource = self.rm.open_resource(visa_address)
+            resource.timeout = timeout_ms
+            if hasattr(resource, "write_termination"):
                 try:
-                    if hasattr(resource, "timeout"):
-                        resource.timeout = timeout_ms
+                    resource.write_termination = ""
                 except Exception:
                     pass
-                return resource, res_lock
-
-            if visa_address.upper().startswith("MOCK::"):
-                resource = MockVisaResource(visa_address)
-                resource.timeout = timeout_ms
+            if visa_address.upper().startswith("USB") and hasattr(resource, "read_termination"):
+                try:
+                    resource.read_termination = "\n"
+                except Exception:
+                    pass
+            
+            with self.lock:
                 self.resource_cache[visa_address] = resource
-                logger.info("VISAMANAGER", f"Created cached Mock resource: {visa_address}")
-                return resource, res_lock
+                self.pending_opens.pop(visa_address, None)
+                open_event.set()
 
-            if not self.rm:
-                raise RuntimeError("No VISA ResourceManager available to connect to physical hardware.")
-
-            try:
-                resource = self.rm.open_resource(visa_address)
-                resource.timeout = timeout_ms
-                if hasattr(resource, "write_termination"):
-                    try:
-                        resource.write_termination = ""
-                    except Exception:
-                        pass
-                if visa_address.upper().startswith("USB") and hasattr(resource, "read_termination"):
-                    try:
-                        resource.read_termination = "\n"
-                    except Exception:
-                        pass
-                self.resource_cache[visa_address] = resource
-                logger.info("VISAMANAGER", f"Connected and cached physical resource: {visa_address}")
-                return resource, res_lock
-            except Exception as e:
-                logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
-                raise
+            logger.info("VISAMANAGER", f"Connected and cached physical resource: {visa_address}")
+            return resource, res_lock
+        except Exception as e:
+            with self.lock:
+                self.pending_opens.pop(visa_address, None)
+                open_event.set()
+                with self.unresponsive_lock:
+                    self.unresponsive_cache[visa_address] = time.time()
+            logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
+            raise
 
     async def async_get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
-        """Asynchronously acquires resource, offloading blocking open_resource calls off the main event loop."""
-        return await asyncio.to_thread(self.get_resource, visa_address, timeout_ms)
+        """Asynchronously acquires resource with connect budget timeout off the main event loop."""
+        connect_budget_s = min(5.0, (timeout_ms / 1000.0) + 2.0)
+        return await asyncio.wait_for(
+            asyncio.to_thread(self.get_resource, visa_address, timeout_ms),
+            timeout=connect_budget_s
+        )
 
     def purge_resource(self, visa_address: str) -> None:
         """Closes and removes a resource from cache (e.g., after a fatal connection error)."""

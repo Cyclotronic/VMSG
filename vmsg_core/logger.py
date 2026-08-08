@@ -1,5 +1,6 @@
 import datetime
 import threading
+import traceback
 from collections import deque
 from typing import List, Dict, Any
 
@@ -27,8 +28,13 @@ class SystemLogger:
             self.log_category_visa = bool(settings.get("log_category_visa", True))
             self.log_category_system = bool(settings.get("log_category_system", True))
 
-    def log(self, level: str, category: str, message: str) -> None:
+    def log(self, level: str, category: str, message: str, exc_info: bool = False) -> None:
         """Appends a log message to the buffer, applying dynamic filters."""
+        if exc_info:
+            tb = traceback.format_exc()
+            if tb and tb.strip() != "NoneType: None":
+                message = f"{message}\n{tb.strip()}"
+
         level_upper = level.upper()
         cat_upper = category.upper()
         
@@ -67,17 +73,17 @@ class SystemLogger:
         if self.enable_stdout:
             print(f"[{timestamp}] [{level_upper}] [{cat_upper}] {message}", flush=True)
 
-    def debug(self, category: str, message: str) -> None:
-        self.log("DEBUG", category, message)
+    def debug(self, category: str, message: str, exc_info: bool = False) -> None:
+        self.log("DEBUG", category, message, exc_info=exc_info)
 
-    def info(self, category: str, message: str) -> None:
-        self.log("INFO", category, message)
+    def info(self, category: str, message: str, exc_info: bool = False) -> None:
+        self.log("INFO", category, message, exc_info=exc_info)
 
-    def warning(self, category: str, message: str) -> None:
-        self.log("WARN", category, message)
+    def warning(self, category: str, message: str, exc_info: bool = False) -> None:
+        self.log("WARN", category, message, exc_info=exc_info)
 
-    def error(self, category: str, message: str) -> None:
-        self.log("ERROR", category, message)
+    def error(self, category: str, message: str, exc_info: bool = False) -> None:
+        self.log("ERROR", category, message, exc_info=exc_info)
 
     def get_logs(self, since_id: int = 0) -> List[Dict[str, Any]]:
         """Returns a list of log entries newer than the specified sequence ID."""

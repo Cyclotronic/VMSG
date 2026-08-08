@@ -131,6 +131,8 @@ async def main():
         await socket_server.stop()
         # Clean up PyVISA connections
         visa.purge_all_resources()
+        # Save any dirty config state synchronously before exiting
+        config.save_config_sync()
         logger.info("MAIN", "Cleanup finished. Exit.")
 
 if __name__ == "__main__":

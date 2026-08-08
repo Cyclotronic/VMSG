@@ -14,6 +14,13 @@ _SESSION_ONLY = {
     "addr", "auto", "mode", "eos", "eoi", "read_tmo_ms", "eot_enable", "eot_char"
 }
 
+class ResourceLease:
+    """Represents a session-scoped lease on a VISA resource for query atomicity."""
+    def __init__(self, visa_address: str, session_id: tuple, expires_at: float):
+        self.visa_address = visa_address
+        self.session_id = session_id
+        self.expires_at = expires_at
+
 class PrologixSocketServer:
     """Asynchronous TCP Socket Server running on Port 1234 that implements the VISA Mapping TCP/IP Socket Gateway (VMSG) with Prologix Ethernet compatible control."""
     def __init__(self, host: str, port: int, config_manager: ConfigManager, visa_manager: VisaManager):
@@ -26,6 +33,63 @@ class PrologixSocketServer:
         self.active_tasks = set()
         self.client_sessions: Dict[tuple, Dict[str, Any]] = {}
         self.is_running = False
+        self._resource_leases: Dict[str, ResourceLease] = {}
+        self._lease_cond: Optional[asyncio.Condition] = None
+
+    def _get_lease_cond(self) -> asyncio.Condition:
+        if self._lease_cond is None:
+            self._lease_cond = asyncio.Condition()
+        return self._lease_cond
+
+    async def acquire_lease(self, visa_address: str, client_addr: tuple, timeout_ms: int) -> None:
+        """Acquires a session-scoped lease on a VISA resource for auto=0 atomicity."""
+        cond = self._get_lease_cond()
+        async with cond:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            timeout_s = (timeout_ms / 1000.0) + 1.0
+            deadline = now + timeout_s
+
+            while visa_address in self._resource_leases:
+                lease = self._resource_leases[visa_address]
+                if lease.session_id == client_addr:
+                    lease.expires_at = now + timeout_s
+                    return
+                if lease.expires_at < now:
+                    del self._resource_leases[visa_address]
+                    cond.notify_all()
+                    break
+
+                wait_time = deadline - now
+                if wait_time <= 0:
+                    raise asyncio.TimeoutError(f"Resource {visa_address} is leased by session {lease.session_id}")
+                try:
+                    await asyncio.wait_for(cond.wait(), timeout=min(0.5, wait_time))
+                except asyncio.TimeoutError:
+                    pass
+                now = loop.time()
+
+            self._resource_leases[visa_address] = ResourceLease(visa_address, client_addr, now + timeout_s)
+
+    async def release_lease(self, visa_address: str, client_addr: tuple) -> None:
+        """Releases a session lease on a VISA resource."""
+        cond = self._get_lease_cond()
+        async with cond:
+            if visa_address in self._resource_leases:
+                lease = self._resource_leases[visa_address]
+                if lease.session_id == client_addr:
+                    del self._resource_leases[visa_address]
+                    cond.notify_all()
+
+    async def release_session_leases(self, client_addr: tuple) -> None:
+        """Releases all leases owned by a client session on disconnect or addr change."""
+        cond = self._get_lease_cond()
+        async with cond:
+            to_del = [addr for addr, l in self._resource_leases.items() if l.session_id == client_addr]
+            for addr in to_del:
+                del self._resource_leases[addr]
+            if to_del:
+                cond.notify_all()
 
     def get_client_setting(self, client_addr: tuple, key: str, default: Any = None) -> Any:
         """Gets a setting value specific to a TCP client connection session."""
@@ -128,6 +192,9 @@ class PrologixSocketServer:
                     break
 
                 buffer += data.decode('utf-8', errors='replace')
+                if len(buffer) > 65536:
+                    logger.warning("SOCKET_SERVER", f"Client {client_address} buffer limit exceeded (64KB). Truncating buffer...")
+                    buffer = buffer[-4096:]
                 
                 # Split commands on CR, LF, or CR+LF
                 lines = re.split(r'\r\n|\n|\r', buffer)
@@ -147,7 +214,6 @@ class PrologixSocketServer:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            import traceback; traceback.print_exc()
             logger.error("SOCKET_SERVER", f"Error serving client {client_address}: {e}", exc_info=True)
         finally:
             writer.close()
@@ -157,6 +223,7 @@ class PrologixSocketServer:
                 pass
             self.active_connections.discard(client_address)
             self.client_sessions.pop(client_address, None)
+            await self.release_session_leases(client_address)
             if current_task:
                 self.active_tasks.discard(current_task)
             logger.info("SOCKET_SERVER", f"Client connection closed: {client_address}")
@@ -444,9 +511,12 @@ class PrologixSocketServer:
         if not visa_addr:
             return self._empty_response(client_addr) if auto_mode == 1 else None
 
+        await self.acquire_lease(visa_addr, client_addr, read_tmo_ms)
+
         try:
             res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
+            await self.release_lease(visa_addr, client_addr)
             logger.error("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Failed to acquire connection to {visa_addr}: {e}")
             return self._empty_response(client_addr) if auto_mode == 1 else None
 
@@ -478,20 +548,23 @@ class PrologixSocketServer:
             if "?" in command:
                 self.set_client_setting(client_addr, "last_query_addr", curr_addr)
                 
-            if auto_mode == 1 and response is not None:
-                if response.endswith("\r\n"):
-                    response = response[:-2]
-                elif response.endswith("\n") or response.endswith("\r"):
-                    response = response[:-1]
-                return response + self._empty_response(client_addr)
-            elif auto_mode == 1:
+            if auto_mode == 1:
+                await self.release_lease(visa_addr, client_addr)
+                if response is not None:
+                    if response.endswith("\r\n"):
+                        response = response[:-2]
+                    elif response.endswith("\n") or response.endswith("\r"):
+                        response = response[:-1]
+                    return response + self._empty_response(client_addr)
                 return self._empty_response(client_addr)
+
+            if "?" not in command:
+                await self.release_lease(visa_addr, client_addr)
 
             return None
         except Exception as e:
-            print(f"[DEBUG] route_instrument_cmd exception: {e}")
-            import traceback; traceback.print_exc()
-            logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Transaction failed to {visa_addr}: {e}")
+            await self.release_lease(visa_addr, client_addr)
+            logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Transaction failed to {visa_addr}: {e}", exc_info=True)
             if not visa_addr.upper().startswith("MOCK::"):
                 def _cleanup():
                     try:
@@ -508,12 +581,12 @@ class PrologixSocketServer:
         """Performs a read operation on the currently addressed instrument and formats output."""
         query_addr = self.get_client_setting(client_addr, "last_query_addr")
         if query_addr is not None:
-            curr_addr = query_addr
+            curr_addr = int(query_addr)
             self.set_client_setting(client_addr, "last_query_addr", None)
         else:
-            curr_addr = self.get_client_setting(client_addr, "addr")
+            curr_addr = int(self.get_client_setting(client_addr, "addr", 1))
             
-        read_tmo_ms = self.get_client_setting(client_addr, "read_tmo_ms")
+        read_tmo_ms = int(self.get_client_setting(client_addr, "read_tmo_ms", 3000))
         
         mapping = self.config.get_mapping(curr_addr)
         unmapped_behavior = self.config.get_setting("unmapped_behavior", "message")
@@ -529,9 +602,11 @@ class PrologixSocketServer:
             return self._empty_response(client_addr)
 
         try:
+            await self.acquire_lease(visa_addr, client_addr, read_tmo_ms)
             res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Connection failed to {visa_addr}: {e}")
+            await self.release_lease(visa_addr, client_addr)
             return self._empty_response(client_addr)
 
         interface_lock = self.visa_manager.get_interface_lock(visa_addr)
@@ -573,6 +648,8 @@ class PrologixSocketServer:
                 await asyncio.to_thread(_cleanup)
                 
             return self._empty_response(client_addr)
+        finally:
+            await self.release_lease(visa_addr, client_addr)
 
     async def perform_serial_poll(self, address: int) -> int:
         """Performs a standard GPIB Serial Poll (reads STB) of the specified virtual address."""

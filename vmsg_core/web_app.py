@@ -1,5 +1,6 @@
 import os
 import asyncio
+import re
 from typing import Dict, Any, Optional, List
 from fastapi import FastAPI, HTTPException, Body, APIRouter
 from fastapi.responses import FileResponse, JSONResponse
@@ -60,7 +61,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -74,10 +75,20 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         socket_active = False
         client_count = 0
         active_connections_list = []
+        sessions_info = []
         if app.state.socket_server:
             socket_active = app.state.socket_server.is_running
             client_count = len(app.state.socket_server.active_connections)
             active_connections_list = [f"{c[0]}:{c[1]}" for c in app.state.socket_server.active_connections]
+            if hasattr(app.state.socket_server, "client_sessions"):
+                for client_peer, sess in list(app.state.socket_server.client_sessions.items()):
+                    sessions_info.append({
+                        "peer": f"{client_peer[0]}:{client_peer[1]}",
+                        "addr": sess.get("addr", 1),
+                        "auto": sess.get("auto", 0),
+                        "mode": sess.get("mode", 1),
+                        "read_tmo_ms": sess.get("read_tmo_ms", 3000)
+                    })
 
         settings = app.state.config.get_settings()
         current_addr = settings["addr"]
@@ -89,7 +100,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 "active": socket_active,
                 "port": 1234,
                 "client_count": client_count,
-                "clients": active_connections_list
+                "clients": active_connections_list,
+                "sessions": sessions_info
             },
             "prologix_settings": settings,
             "active_instrument": {
@@ -487,17 +499,20 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
 
         try:
             res, res_lock = app.state.visa.get_resource(visa_addr, timeout_ms=settings["read_tmo_ms"])
+            interface_lock = app.state.visa.get_interface_lock(visa_addr)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Could not connect to {visa_addr}: {e}")
 
         # Execute on thread to avoid blocking FastAPI event loop
         def _exec_write():
-            with res_lock:
-                res.write(command)
+            with interface_lock:
+                with res_lock:
+                    res.write(command)
 
         def _exec_read():
-            with res_lock:
-                return res.read()
+            with interface_lock:
+                with res_lock:
+                    return res.read()
 
         try:
             logger.info("CONSOLE", f"Sending command '{command}' to slot {target_addr} ({visa_addr})")
@@ -546,16 +561,16 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         # Get all logs
         all_logs = logger.get_logs()
         
-        # Filter logs for any lines that contain the visa address or the target slot index
+        # Filter logs using word boundaries for target slot/address
         filtered = []
+        slot_pattern = re.compile(r'\b(slot|address|addr)\s+' + str(address) + r'\b', re.IGNORECASE)
         for entry in all_logs:
             msg = entry.get("message", "")
             
-            # Check if this log entry belongs to the target instrument
             is_match = False
             if visa_addr.lower() in msg.lower():
                 is_match = True
-            elif f"slot {address}" in msg.lower() or f"address {address}" in msg.lower():
+            elif slot_pattern.search(msg):
                 is_match = True
                 
             if is_match:
