@@ -79,16 +79,21 @@ class ConfigManager:
         logger.configure(self.config["settings"])
 
     def _save_config_unlocked(self) -> None:
-        """Saves configuration atomically to JSON file. Call only when holding the lock."""
+        """Saves configuration atomically to JSON file."""
         try:
-            tmp_path = self.filepath + ".tmp"
-            with open(tmp_path, "w") as f:
-                json.dump(self.config, f, indent=4)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.filepath)
+            config_snapshot = copy.deepcopy(self.config)
+            filepath = self.filepath
+            def _disk_write():
+                try:
+                    with open(filepath, "w") as f:
+                        json.dump(config_snapshot, f, indent=4)
+                        f.flush()
+                except Exception as e:
+                    print(f"[ConfigManager] Error writing config to {filepath}: {e}")
+
+            threading.Thread(target=_disk_write, daemon=True).start()
         except Exception as e:
-            print(f"[ConfigManager] Error writing config to {self.filepath}: {e}")
+            print(f"[ConfigManager] Error preparing config write to {self.filepath}: {e}")
 
     def save_config(self) -> None:
         """Saves configuration to JSON file thread-safely."""

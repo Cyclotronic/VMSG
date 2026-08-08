@@ -9,7 +9,10 @@ from .logger import logger
 
 from pyvisa.constants import RENLineOperation
 
-_SESSION_ONLY = {"last_query_addr", "savecfg", "llo", "loc", "ifc"}
+_SESSION_ONLY = {
+    "last_query_addr", "savecfg", "llo", "loc", "ifc",
+    "addr", "auto", "mode", "eos", "eoi", "read_tmo_ms", "eot_enable", "eot_char"
+}
 
 class PrologixSocketServer:
     """Asynchronous TCP Socket Server running on Port 1234 that implements the VISA Mapping TCP/IP Socket Gateway (VMSG) with Prologix Ethernet compatible control."""
@@ -144,7 +147,8 @@ class PrologixSocketServer:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error("SOCKET_SERVER", f"Error serving client {client_address}: {e}")
+            import traceback; traceback.print_exc()
+            logger.error("SOCKET_SERVER", f"Error serving client {client_address}: {e}", exc_info=True)
         finally:
             writer.close()
             try:
@@ -418,11 +422,11 @@ class PrologixSocketServer:
             return None
 
     async def route_instrument_cmd(self, command: str, client_addr: tuple) -> Optional[str]:
-        """Routes regular instrument command to physical/mock instrument."""
-        curr_addr = self.get_client_setting(client_addr, "addr")
-        auto_mode = self.get_client_setting(client_addr, "auto")
-        read_tmo_ms = self.get_client_setting(client_addr, "read_tmo_ms")
-        eos_val = self.get_client_setting(client_addr, "eos")
+        """Routes regular instrument command to physical/mock instrument atomically."""
+        curr_addr = int(self.get_client_setting(client_addr, "addr", 1))
+        auto_mode = 1 if int(self.get_client_setting(client_addr, "auto", 0)) == 1 else 0
+        read_tmo_ms = int(self.get_client_setting(client_addr, "read_tmo_ms", 3000))
+        eos_val = int(self.get_client_setting(client_addr, "eos", 0))
         
         mapping = self.config.get_mapping(curr_addr)
         unmapped_behavior = self.config.get_setting("unmapped_behavior", "message")
@@ -441,7 +445,7 @@ class PrologixSocketServer:
             return self._empty_response(client_addr) if auto_mode == 1 else None
 
         try:
-            res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
+            res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Failed to acquire connection to {visa_addr}: {e}")
             return self._empty_response(client_addr) if auto_mode == 1 else None
@@ -450,23 +454,44 @@ class PrologixSocketServer:
         command_with_term = command + eos_terminator
         interface_lock = self.visa_manager.get_interface_lock(visa_addr)
 
-        def _execute_write():
+        def _execute_transaction():
             is_mock = visa_addr.upper().startswith("MOCK::")
             if is_mock:
                 with res_lock:
                     res.write(command_with_term)
+                    if auto_mode == 1:
+                        return res.read()
+                    return None
             else:
                 with interface_lock:
                     with res_lock:
                         res.write(command_with_term)
+                        if auto_mode == 1:
+                            return res.read()
+                        return None
 
         try:
             logger.info("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Sending to {visa_addr} (Addr {curr_addr}): {repr(command_with_term)}")
-            await asyncio.to_thread(_execute_write)
+            timeout_s = (read_tmo_ms / 1000.0) + 1.5
+            response = await asyncio.wait_for(asyncio.to_thread(_execute_transaction), timeout=timeout_s)
+            
             if "?" in command:
                 self.set_client_setting(client_addr, "last_query_addr", curr_addr)
+                
+            if auto_mode == 1 and response is not None:
+                if response.endswith("\r\n"):
+                    response = response[:-2]
+                elif response.endswith("\n") or response.endswith("\r"):
+                    response = response[:-1]
+                return response + self._empty_response(client_addr)
+            elif auto_mode == 1:
+                return self._empty_response(client_addr)
+
+            return None
         except Exception as e:
-            logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Write failed to {visa_addr}: {e}")
+            print(f"[DEBUG] route_instrument_cmd exception: {e}")
+            import traceback; traceback.print_exc()
+            logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Transaction failed to {visa_addr}: {e}")
             if not visa_addr.upper().startswith("MOCK::"):
                 def _cleanup():
                     try:
@@ -479,11 +504,6 @@ class PrologixSocketServer:
                 await asyncio.to_thread(_cleanup)
             return self._empty_response(client_addr) if auto_mode == 1 else None
 
-        if auto_mode == 1:
-            return await self.perform_instrument_read(client_addr)
-
-        return None
-
     async def perform_instrument_read(self, client_addr: tuple) -> str:
         """Performs a read operation on the currently addressed instrument and formats output."""
         query_addr = self.get_client_setting(client_addr, "last_query_addr")
@@ -494,8 +514,6 @@ class PrologixSocketServer:
             curr_addr = self.get_client_setting(client_addr, "addr")
             
         read_tmo_ms = self.get_client_setting(client_addr, "read_tmo_ms")
-        eot_enable = self.get_client_setting(client_addr, "eot_enable")
-        eot_char = self.get_client_setting(client_addr, "eot_char")
         
         mapping = self.config.get_mapping(curr_addr)
         unmapped_behavior = self.config.get_setting("unmapped_behavior", "message")
@@ -511,7 +529,7 @@ class PrologixSocketServer:
             return self._empty_response(client_addr)
 
         try:
-            res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
+            res, res_lock = await self.visa_manager.async_get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Connection failed to {visa_addr}: {e}")
             return self._empty_response(client_addr)
@@ -529,7 +547,8 @@ class PrologixSocketServer:
                         return res.read()
 
         try:
-            response = await asyncio.to_thread(_execute_read)
+            timeout_s = (read_tmo_ms / 1000.0) + 1.5
+            response = await asyncio.wait_for(asyncio.to_thread(_execute_read), timeout=timeout_s)
             logger.info("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Read from {visa_addr} (Addr {curr_addr}): {repr(response)}")
             
             # Format output line endings
@@ -538,11 +557,7 @@ class PrologixSocketServer:
             elif response.endswith("\n") or response.endswith("\r"):
                 response = response[:-1]
 
-            term = "\r\n"
-            if eot_enable == 1:
-                term = chr(eot_char) + term
-                
-            out = response + term
+            out = response + self._empty_response(client_addr)
             logger.info("TRAFFIC_OUT", f"[{client_addr[0]}:{client_addr[1]}] <- {repr(out)}")
             return out
         except Exception as e:

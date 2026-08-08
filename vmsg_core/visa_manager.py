@@ -2,6 +2,7 @@ import time
 import threading
 import random
 import re
+import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import pyvisa
 from pyvisa.errors import VisaIOError
@@ -142,6 +143,7 @@ class VisaManager:
         """
         Retrieves a thread-safe connection to the requested VISA address.
         If address starts with 'MOCK::', returns a simulated resource.
+        NOTE: Must be called from a worker thread or via async_get_resource on event loop.
         """
         if not visa_address:
             raise ValueError("Empty VISA address")
@@ -189,6 +191,10 @@ class VisaManager:
             except Exception as e:
                 logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
                 raise
+
+    async def async_get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
+        """Asynchronously acquires resource, offloading blocking open_resource calls off the main event loop."""
+        return await asyncio.to_thread(self.get_resource, visa_address, timeout_ms)
 
     def purge_resource(self, visa_address: str) -> None:
         """Closes and removes a resource from cache (e.g., after a fatal connection error)."""

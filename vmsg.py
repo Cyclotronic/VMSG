@@ -62,7 +62,8 @@ async def main():
     print(f"  Prologix Control Socket : tcp://0.0.0.0:1234")
     print(f"  Web Dashboard & REST API : http://localhost:8080")
     print(f"  Config File Path         : {config.filepath}")
-    backend_type = "Pure-Python (@py)" if (visa.rm and "@py" in str(type(visa.rm))) else ("NI-VISA System" if visa.rm else "None (Mock Only)")
+    visalib_str = str(getattr(visa.rm, "visalib", ""))
+    backend_type = "Pure-Python (@py)" if ("py" in visalib_str.lower()) else ("NI-VISA System" if visa.rm else "None (Mock Only)")
     print(f"  VISA Backend Loaded      : {backend_type}")
     print("================================================================================\n")
 
