@@ -45,30 +45,8 @@ async def main():
     # 4. Create FastAPI App on Port 8080
     app = create_app(config, visa, socket_server)
 
-    # 5. Run USB Lottery Healing on startup
-    logger.info("HEALER", "Executing startup automated USB Lottery Healing...")
-    try:
-        mappings = config.get_mappings()
-        healing_actions = visa.heal_mappings(mappings)
-        for action in healing_actions:
-            addr = action["virtual_address"]
-            new_addr = action["new_visa_address"]
-            mapping_entry = mappings[str(addr)]
-            config.set_mapping(
-                address=addr,
-                visa_address=new_addr,
-                idn_pattern=mapping_entry["idn_pattern"],
-                description=mapping_entry["description"]
-            )
-            logger.info("HEALER", f"Auto-Healed Address {addr} on startup: {action['old_visa_address']} -> {new_addr}")
-        if not healing_actions:
-            logger.info("HEALER", "All expected instruments are present and verified at their ports.")
-    except Exception as e:
-        logger.warning("HEALER", f"Startup Lottery Healing encountered an issue: {e}")
-
-    # 6. Configure and start Uvicorn web server asynchronously
+    # 5. Configure and start Uvicorn web server asynchronously
     import uvicorn
-    # Use standard uvicorn server runner that runs on the same event loop
     uvicorn_config = uvicorn.Config(
         app,
         host="0.0.0.0",
@@ -80,15 +58,41 @@ async def main():
 
     logger.info("MAIN", "Starting servers...")
     
-    # Run socket server and web server concurrently on the single thread event loop
+    # Run socket server and web server concurrently
     socket_task = asyncio.create_task(socket_server.start())
     web_task = asyncio.create_task(uvicorn_server.serve())
+
+    # 6. Run USB Lottery Healing asynchronously after servers are up
+    async def _async_startup_healing():
+        await asyncio.sleep(0.5)
+        logger.info("HEALER", "Executing startup automated USB Lottery Healing...")
+        try:
+            mappings = config.get_mappings()
+            healing_actions = await asyncio.to_thread(visa.heal_mappings, mappings)
+            for action in healing_actions:
+                addr = action["virtual_address"]
+                new_addr = action["new_visa_address"]
+                mapping_entry = mappings.get(str(addr), {})
+                config.set_mapping(
+                    address=addr,
+                    visa_address=new_addr,
+                    idn_pattern=mapping_entry.get("idn_pattern", ""),
+                    description=mapping_entry.get("description", "")
+                )
+                logger.info("HEALER", f"Auto-Healed Address {addr} on startup: {action['old_visa_address']} -> {new_addr}")
+            if not healing_actions:
+                logger.info("HEALER", "All expected instruments are present and verified at their ports.")
+        except Exception as e:
+            logger.warning("HEALER", f"Startup Lottery Healing encountered an issue: {e}")
+
+    asyncio.create_task(_async_startup_healing())
 
     try:
         done, pending = await asyncio.wait(
             [socket_task, web_task],
             return_when=asyncio.FIRST_COMPLETED
         )
+
         for t in done:
             if not t.cancelled() and t.exception():
                 logger.error("MAIN", f"Server task exited unexpectedly: {t.exception()}")

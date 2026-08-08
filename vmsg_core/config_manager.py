@@ -1,5 +1,6 @@
 import os
 import json
+import copy
 import threading
 from typing import Dict, Any, Optional
 
@@ -37,7 +38,7 @@ class ConfigManager:
     def __init__(self, filepath: str = DEFAULT_MAPPINGS_FILE):
         self.filepath = filepath
         self.lock = threading.Lock()
-        self.config = DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(DEFAULT_CONFIG)
         self.load_config()
 
     def load_config(self) -> None:
@@ -49,7 +50,7 @@ class ConfigManager:
                         loaded = json.load(f)
                         # Ensure basic keys exist
                         if "settings" not in loaded:
-                            loaded["settings"] = DEFAULT_CONFIG["settings"].copy()
+                            loaded["settings"] = copy.deepcopy(DEFAULT_CONFIG["settings"])
                         if "mappings" not in loaded:
                             loaded["mappings"] = {}
                         
@@ -61,20 +62,24 @@ class ConfigManager:
                         self.config = loaded
                 except Exception as e:
                     print(f"[ConfigManager] Error loading config, resetting to default: {e}")
-                    self.config = DEFAULT_CONFIG.copy()
+                    self.config = copy.deepcopy(DEFAULT_CONFIG)
                     self._save_config_unlocked()
             else:
-                self.config = DEFAULT_CONFIG.copy()
+                self.config = copy.deepcopy(DEFAULT_CONFIG)
                 self._save_config_unlocked()
         
         # Propagate config settings to global logger
         logger.configure(self.config["settings"])
 
     def _save_config_unlocked(self) -> None:
-        """Saves configuration to JSON file. Call only when holding the lock."""
+        """Saves configuration atomically to JSON file. Call only when holding the lock."""
         try:
-            with open(self.filepath, "w") as f:
+            tmp_path = self.filepath + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(self.config, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.filepath)
         except Exception as e:
             print(f"[ConfigManager] Error writing config to {self.filepath}: {e}")
 
@@ -86,19 +91,24 @@ class ConfigManager:
     def get_settings(self) -> Dict[str, Any]:
         """Gets a copy of the Prologix controller settings."""
         with self.lock:
-            return self.config["settings"].copy()
+            return copy.deepcopy(self.config["settings"])
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         """Gets a specific setting value."""
         with self.lock:
             return self.config["settings"].get(key, default)
 
-    def update_settings(self, new_settings: Dict[str, Any]) -> None:
-        """Updates multiple settings and persists changes."""
+    def set_runtime_setting(self, key: str, value: Any) -> None:
+        """Updates in-memory setting without writing to disk."""
+        with self.lock:
+            self.config["settings"][key] = value
+
+    def update_settings(self, new_settings: Dict[str, Any], persist: bool = True) -> None:
+        """Updates multiple settings and persists changes if requested."""
         with self.lock:
             for k, v in new_settings.items():
                 if k in DEFAULT_CONFIG["settings"]:
-                    # Validate types / ranges if necessary
+                    # Validate types / ranges
                     if k == "addr":
                         val = int(v)
                         if 0 <= val <= 30:
@@ -125,25 +135,30 @@ class ConfigManager:
                             self.config["settings"][k] = val
                     else:
                         self.config["settings"][k] = v
-            self._save_config_unlocked()
+                else:
+                    self.config["settings"][k] = v
+
+            if persist and self.config["settings"].get("savecfg", 1) == 1:
+                self._save_config_unlocked()
             
         # Dynamically sync configurations to global logger instance
         logger.configure(self.config["settings"])
 
-    def update_setting(self, key: str, value: Any) -> None:
-        """Updates a single setting and persists change."""
-        self.update_settings({key: value})
+    def update_setting(self, key: str, value: Any, persist: bool = True) -> None:
+        """Updates a single setting."""
+        self.update_settings({key: value}, persist=persist)
 
     def get_mappings(self) -> Dict[str, Dict[str, str]]:
         """Gets virtual GPIB mappings (0-30)."""
         with self.lock:
-            return self.config["mappings"].copy()
+            return copy.deepcopy(self.config["mappings"])
 
     def get_mapping(self, address: int) -> Optional[Dict[str, str]]:
         """Gets mapping for a specific virtual address (0-30)."""
         with self.lock:
             addr_str = str(address)
-            return self.config["mappings"].get(addr_str)
+            m = self.config["mappings"].get(addr_str)
+            return copy.deepcopy(m) if m else None
 
     def set_mapping(self, address: int, visa_address: str, idn_pattern: str = "", description: str = "") -> None:
         """Sets or updates mapping for a virtual address (0-30) and persists change."""
@@ -156,7 +171,8 @@ class ConfigManager:
                 "idn_pattern": idn_pattern,
                 "description": description
             }
-            self._save_config_unlocked()
+            if self.config["settings"].get("savecfg", 1) == 1:
+                self._save_config_unlocked()
 
     def delete_mapping(self, address: int) -> bool:
         """Deletes mapping for a virtual address. Returns True if found and deleted."""
@@ -166,7 +182,8 @@ class ConfigManager:
             addr_str = str(address)
             if addr_str in self.config["mappings"]:
                 del self.config["mappings"][addr_str]
-                self._save_config_unlocked()
+                if self.config["settings"].get("savecfg", 1) == 1:
+                    self._save_config_unlocked()
                 return True
             return False
 
@@ -174,4 +191,6 @@ class ConfigManager:
         """Clears all address mappings."""
         with self.lock:
             self.config["mappings"] = {}
-            self._save_config_unlocked()
+            if self.config["settings"].get("savecfg", 1) == 1:
+                self._save_config_unlocked()
+

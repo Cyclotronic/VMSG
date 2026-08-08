@@ -1167,67 +1167,81 @@
         }
 
         // Fetch logs periodically
+        let lastLogId = 0;
+        let cachedLogs = [];
+
         async function fetchLogs() {
             try {
-                const response = await fetch('/api/logs');
-                const logs = await response.json();
+                const response = await fetch(`/api/logs?since=${lastLogId}`);
+                const newLogs = await response.json();
                 
-                const feed = document.getElementById('log-feed');
-                // Check if user is scrolled to bottom
-                const isScrolledToBottom = feed.scrollHeight - feed.clientHeight <= feed.scrollTop + 30;
-
-                const filterSys = document.getElementById('filter-log-sys').checked;
-                const filterVisa = document.getElementById('filter-log-visa').checked;
-                const filterTraffic = document.getElementById('filter-log-traffic').checked;
-
-                const filteredLogs = logs.filter(log => {
-                    const cat = log.category || '';
-                    if (cat === 'TRAFFIC_IN' || cat === 'TRAFFIC_OUT') {
-                        return filterTraffic;
+                if (newLogs.length > 0) {
+                    cachedLogs = cachedLogs.concat(newLogs);
+                    if (cachedLogs.length > 1000) {
+                        cachedLogs = cachedLogs.slice(cachedLogs.length - 1000);
                     }
-                    if (cat.includes('INSTR') || cat.includes('VISA') || cat === 'SCAN') {
-                        return filterVisa;
-                    }
-                    return filterSys;
-                });
-
-                feed.innerHTML = '';
-                if (filteredLogs.length === 0) {
-                    feed.innerHTML = '<div class="text-slate-500 italic text-center py-4">No matching logs found for active filters.</div>';
-                    return;
+                    lastLogId = Math.max(...newLogs.map(log => log.id || 0), lastLogId);
                 }
-
-                filteredLogs.forEach(log => {
-                    const el = document.createElement('div');
-                    
-                    let catColor = 'text-slate-500 dark:text-slate-400';
-                    if (log.category === 'TRAFFIC_IN') catColor = 'text-cyber-indigo dark:text-indigo-400 font-bold';
-                    else if (log.category === 'TRAFFIC_OUT') catColor = 'text-cyber-teal dark:text-teal-400 font-bold';
-                    else if (log.category === 'SOCKET_SERVER') catColor = 'text-cyber-amber dark:text-amber-500';
-                    else if (log.category === 'INSTR_WRITE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
-                    else if (log.category === 'INSTR_READ') catColor = 'text-teal-600 dark:text-teal-400 font-semibold';
-                    else if (log.category === 'HEALER') catColor = 'text-cyber-emerald dark:text-emerald-400 font-bold';
-                    else if (log.category === 'CONSOLE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
-                    
-                    let levelColor = 'text-slate-500 dark:text-slate-400';
-                    if (log.level === 'WARN') levelColor = 'text-cyber-amber dark:text-amber-500 font-bold';
-                    else if (log.level === 'ERROR') levelColor = 'text-cyber-rose dark:text-rose-400 font-bold';
-
-                    el.className = 'border-b border-slate-200 dark:border-white/5 pb-1';
-                    el.innerHTML = `
-                        <span class="text-slate-500 text-[9px] font-normal">[${log.timestamp.split(' ')[1]}]</span>
-                        <span class="text-[9px] uppercase tracking-wider font-semibold ${levelColor}">${log.level}</span>
-                        <span class="text-[9px] uppercase tracking-wider font-semibold ${catColor}">[${log.category}]</span>
-                        <span class="text-slate-700 dark:text-slate-300 ml-1 font-mono">${log.message}</span>
-                    `;
-                    feed.appendChild(el);
-                });
-
-                if (isScrolledToBottom) {
-                    feed.scrollTop = feed.scrollHeight;
-                }
+                
+                renderLogs();
             } catch (err) {
                 console.error("Error fetching logs: ", err);
+            }
+        }
+
+        function renderLogs() {
+            const feed = document.getElementById('log-feed');
+            const isScrolledToBottom = feed.scrollHeight - feed.clientHeight <= feed.scrollTop + 30;
+
+            const filterSys = document.getElementById('filter-log-sys').checked;
+            const filterVisa = document.getElementById('filter-log-visa').checked;
+            const filterTraffic = document.getElementById('filter-log-traffic').checked;
+
+            const filteredLogs = cachedLogs.filter(log => {
+                const cat = log.category || '';
+                if (cat === 'TRAFFIC_IN' || cat === 'TRAFFIC_OUT') {
+                    return filterTraffic;
+                }
+                if (cat.includes('INSTR') || cat.includes('VISA') || cat === 'SCAN') {
+                    return filterVisa;
+                }
+                return filterSys;
+            });
+
+            feed.innerHTML = '';
+            if (filteredLogs.length === 0) {
+                feed.innerHTML = '<div class="text-slate-500 italic text-center py-4">No matching logs found for active filters.</div>';
+                return;
+            }
+
+            filteredLogs.forEach(log => {
+                const el = document.createElement('div');
+                
+                let catColor = 'text-slate-500 dark:text-slate-400';
+                if (log.category === 'TRAFFIC_IN') catColor = 'text-cyber-indigo dark:text-indigo-400 font-bold';
+                else if (log.category === 'TRAFFIC_OUT') catColor = 'text-cyber-teal dark:text-teal-400 font-bold';
+                else if (log.category === 'SOCKET_SERVER') catColor = 'text-cyber-amber dark:text-amber-500';
+                else if (log.category === 'INSTR_WRITE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
+                else if (log.category === 'INSTR_READ') catColor = 'text-teal-600 dark:text-teal-400 font-semibold';
+                else if (log.category === 'HEALER') catColor = 'text-cyber-emerald dark:text-emerald-400 font-bold';
+                else if (log.category === 'CONSOLE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
+                
+                let levelColor = 'text-slate-500 dark:text-slate-400';
+                if (log.level === 'WARN') levelColor = 'text-cyber-amber dark:text-amber-500 font-bold';
+                else if (log.level === 'ERROR') levelColor = 'text-cyber-rose dark:text-rose-400 font-bold';
+
+                el.className = 'border-b border-slate-200 dark:border-white/5 pb-1';
+                el.innerHTML = `
+                    <span class="text-slate-500 text-[9px] font-normal">[${log.timestamp.split(' ')[1]}]</span>
+                    <span class="text-[9px] uppercase tracking-wider font-semibold ${levelColor}">${log.level}</span>
+                    <span class="text-[9px] uppercase tracking-wider font-semibold ${catColor}">[${log.category}]</span>
+                    <span class="text-slate-700 dark:text-slate-300 ml-1 font-mono">${log.message}</span>
+                `;
+                feed.appendChild(el);
+            });
+
+            if (isScrolledToBottom) {
+                feed.scrollTop = feed.scrollHeight;
             }
         }
 
@@ -1526,6 +1540,8 @@
         document.getElementById('btn-clear-logs').onclick = async () => {
             if (confirm("Clear live log buffer?")) {
                 await fetch('/api/logs', { method: 'DELETE' });
+                cachedLogs = [];
+                lastLogId = 0;
                 fetchLogs();
             }
         };

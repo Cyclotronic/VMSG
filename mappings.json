@@ -1,15 +1,15 @@
 {
     "settings": {
-        "addr": 1,
-        "auto": 1,
+        "addr": 2,
+        "auto": 0,
         "mode": 1,
         "eos": 0,
         "eoi": 1,
         "read_tmo_ms": 3000,
         "eot_enable": 0,
         "eot_char": 4,
-        "lon": 0,
-        "savecfg": 1,
+        "lon": 1,
+        "savecfg": 0,
         "unmapped_behavior": "message",
         "auto_heal_usb": true,
         "log_level": "WARN",
@@ -18,5 +18,56 @@
         "log_category_visa": true,
         "log_category_system": true
     },
-    "mappings": {}
+    "mappings": {
+        "1": {
+            "visa_address": "MOCK::DMM::INSTR",
+            "idn_pattern": "HEWLETT-PACKARD,34401A",
+            "description": "Mock HP Multimeter"
+        },
+        "2": {
+            "visa_address": "MOCK::SCOPE::INSTR",
+            "idn_pattern": "TEKTRONIX,TDS 2024",
+            "description": "Mock Tek Scope"
+        },
+        "3": {
+            "visa_address": "MOCK::GENERIC::HP_53131A::INSTR",
+            "idn_pattern": "HP_53131A",
+            "description": "Mock Counter"
+        },
+        "4": {
+            "visa_address": "USB0::0x0A69::0x0880::630041501550::INSTR",
+            "idn_pattern": "63004-150-60",
+            "description": "63004-150-60"
+        },
+        "5": {
+            "visa_address": "USB0::0x14EB::0x0090::979819::INSTR",
+            "idn_pattern": "PM6690",
+            "description": "PM6690"
+        },
+        "6": {
+            "visa_address": "ASRL7::INSTR",
+            "idn_pattern": "2",
+            "description": "2"
+        },
+        "7": {
+            "visa_address": "GPIB0::3::INSTR",
+            "idn_pattern": "34411A",
+            "description": "34411A"
+        },
+        "8": {
+            "visa_address": "GPIB0::6::INSTR",
+            "idn_pattern": "MODEL 2010",
+            "description": "MODEL 2010"
+        },
+        "9": {
+            "visa_address": "GPIB0::15::INSTR",
+            "idn_pattern": "MODEL 2001M",
+            "description": "MODEL 2001M"
+        },
+        "10": {
+            "visa_address": "GPIB0::17::INSTR",
+            "idn_pattern": "MODEL 2002",
+            "description": "MODEL 2002"
+        }
+    }
 }

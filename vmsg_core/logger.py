@@ -1,13 +1,15 @@
 import datetime
 import threading
+from collections import deque
 from typing import List, Dict, Any
 
 class SystemLogger:
     """A thread-safe in-memory log buffer that stores recent logs for retrieval by the web UI."""
     def __init__(self, max_logs: int = 1000):
         self.max_logs = max_logs
-        self.logs: List[Dict[str, Any]] = []
+        self.logs: deque = deque(maxlen=max_logs)
         self.lock = threading.Lock()
+        self._seq = 0
         
         # Dynamic logging filters (defaults)
         self.log_level = "WARN"
@@ -49,18 +51,19 @@ class SystemLogger:
                 return
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        log_entry = {
-            "timestamp": timestamp,
-            "level": level_upper,
-            "category": cat_upper,
-            "message": message
-        }
-        with self.lock:
-            self.logs.append(log_entry)
-            if len(self.logs) > self.max_logs:
-                self.logs.pop(0)
         
-        # 4. Standard output printing
+        with self.lock:
+            self._seq += 1
+            log_entry = {
+                "id": self._seq,
+                "timestamp": timestamp,
+                "level": level_upper,
+                "category": cat_upper,
+                "message": message
+            }
+            self.logs.append(log_entry)
+        
+        # 3. Standard output printing
         if self.enable_stdout:
             print(f"[{timestamp}] [{level_upper}] [{cat_upper}] {message}", flush=True)
 
@@ -76,10 +79,12 @@ class SystemLogger:
     def error(self, category: str, message: str) -> None:
         self.log("ERROR", category, message)
 
-    def get_logs(self) -> List[Dict[str, Any]]:
-        """Returns a copy of the log buffer."""
+    def get_logs(self, since_id: int = 0) -> List[Dict[str, Any]]:
+        """Returns log entries, optionally filtering entries strictly after since_id."""
         with self.lock:
-            return list(self.logs)
+            if since_id <= 0:
+                return list(self.logs)
+            return [entry for entry in self.logs if entry.get("id", 0) > since_id]
 
     def clear(self) -> None:
         """Clears the log buffer."""
@@ -88,3 +93,4 @@ class SystemLogger:
 
 # Global logger instance
 logger = SystemLogger()
+
