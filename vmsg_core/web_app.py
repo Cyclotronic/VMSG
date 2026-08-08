@@ -142,6 +142,15 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         else:
             raise HTTPException(status_code=404, detail=f"No mapping found for address {address}")
 
+    @api.delete("/mappings")
+    def clear_all_mappings():
+        try:
+            app.state.config.clear_all_mappings()
+            logger.info("WEB_API", "Cleared all virtual address mappings")
+            return {"status": "success", "message": "All virtual address mappings cleared."}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     # 3. Settings Endpoints
     @api.get("/settings")
     def get_settings():

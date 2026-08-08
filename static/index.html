@@ -1766,6 +1766,18 @@
 
             const forceOverwrite = document.getElementById('visa-force-overwrite')?.checked || false;
             const assignedSlots = [];
+
+            if (forceOverwrite) {
+                try {
+                    const clearRes = await fetch('/api/mappings', { method: 'DELETE' });
+                    if (clearRes.ok) {
+                        appState.mappings = {};
+                    }
+                } catch (err) {
+                    console.error("Failed to clear prior configurations:", err);
+                }
+            }
+
             const mappings = appState.mappings;
 
             let currentSlot = 1;
