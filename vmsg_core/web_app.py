@@ -290,66 +290,61 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                     "mappings": app.state.config.get_mappings()
                 }
 
-            current_mappings = app.state.config.get_mappings()
-            
-            # Track which visa_addresses are already mapped
-            mapped_visa_addrs = {m["visa_address"]: addr for addr, m in current_mappings.items()}
+            if force_overwrite:
+                app.state.config.clear_all_mappings()
+                current_mappings = {}
+                mapped_visa_addrs = {}
+            else:
+                current_mappings = app.state.config.get_mappings()
+                mapped_visa_addrs = {m["visa_address"]: addr for addr, m in current_mappings.items()}
             
             assigned_actions = []
-            slot_idx = 1 # Start auto-assigning from slot 1 (slot 0 is avoided as it is reserved for the Prologix controller)
             
             for dev in online_devices:
                 v_addr = dev["visa_address"]
                 idn = dev["idn"]
                 
-                # If this visa_address is already mapped somewhere, skip it to prevent duplicates unless force_overwrite is requested
+                # Skip if already mapped unless forcing overwrite
                 if v_addr in mapped_visa_addrs and not force_overwrite:
                     continue
                 
-                # Find the next slot to map to
-                assigned = False
-                while slot_idx <= 30:
-                    slot_str = str(slot_idx)
-                    has_mapping = slot_str in current_mappings
-                    
-                    if not has_mapping or force_overwrite:
-                        # Construct a description from the IDN
-                        desc = idn.split(",")[1].strip() if len(idn.split(",")) > 1 else idn.split(",")[0].strip()
-                        # Shorten description
-                        desc = desc[:25]
-                        
-                        # Set mapping
-                        fingerprint = app.state.visa.create_fingerprint(idn)
-                        app.state.config.set_mapping(
-                            address=slot_idx,
-                            visa_address=v_addr,
-                            idn_pattern=fingerprint,
-                            description=desc
-                        )
-                        assigned_actions.append({
-                            "virtual_address": slot_idx,
-                            "visa_address": v_addr,
-                            "description": desc,
-                            "overwritten": has_mapping
-                        })
-                        
-                        # Update local state tracker
-                        current_mappings[slot_str] = {
-                            "visa_address": v_addr,
-                            "idn_pattern": desc,
-                            "description": desc
-                        }
-                        mapped_visa_addrs[v_addr] = slot_idx
-                        slot_idx += 1
-                        assigned = True
+                # Find the lowest available virtual slot (1-30)
+                assigned_slot = None
+                for candidate in range(1, 31):
+                    cand_str = str(candidate)
+                    if cand_str not in current_mappings:
+                        assigned_slot = candidate
                         break
-                    else:
-                        # Slot is occupied and we are not forcing overwrite, move to next slot
-                        slot_idx += 1
                 
-                if slot_idx > 30:
-                    # No more available slots
+                if assigned_slot is None:
+                    # No more available virtual slots
                     break
+                    
+                cand_str = str(assigned_slot)
+                desc = idn.split(",")[1].strip() if len(idn.split(",")) > 1 else idn.split(",")[0].strip()
+                desc = desc[:25]
+                fingerprint = app.state.visa.create_fingerprint(idn)
+                
+                app.state.config.set_mapping(
+                    address=assigned_slot,
+                    visa_address=v_addr,
+                    idn_pattern=fingerprint,
+                    description=desc
+                )
+                
+                assigned_actions.append({
+                    "virtual_address": assigned_slot,
+                    "visa_address": v_addr,
+                    "description": desc,
+                    "overwritten": force_overwrite
+                })
+                
+                current_mappings[cand_str] = {
+                    "visa_address": v_addr,
+                    "idn_pattern": fingerprint,
+                    "description": desc
+                }
+                mapped_visa_addrs[v_addr] = assigned_slot
                     
             return {
                 "status": "success",
