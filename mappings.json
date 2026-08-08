@@ -9,7 +9,7 @@
         "eot_enable": 0,
         "eot_char": 4,
         "lon": 1,
-        "savecfg": 0,
+        "savecfg": 1,
         "unmapped_behavior": "message",
         "auto_heal_usb": true,
         "log_level": "WARN",
@@ -50,7 +50,7 @@
             "description": "2"
         },
         "7": {
-            "visa_address": "GPIB0::3::INSTR",
+            "visa_address": "TCPIP::192.168.1.84::INSTR",
             "idn_pattern": "34411A",
             "description": "34411A"
         },
@@ -68,6 +68,11 @@
             "visa_address": "GPIB0::17::INSTR",
             "idn_pattern": "MODEL 2002",
             "description": "MODEL 2002"
+        },
+        "11": {
+            "visa_address": "GPIB0::3::INSTR",
+            "idn_pattern": "34411A",
+            "description": "34411A"
         }
     }
 }

@@ -7,7 +7,7 @@ from .config_manager import ConfigManager
 from .visa_manager import VisaManager
 from .logger import logger
 
-_SESSION_ONLY = {"last_query_addr"}
+_SESSION_ONLY = {"last_query_addr", "savecfg", "llo", "loc", "ifc"}
 
 class PrologixSocketServer:
     """Asynchronous TCP Socket Server running on Port 1234 that implements the VISA Mapping TCP/IP Socket Gateway (VMSG) with Prologix Ethernet compatible control."""
@@ -277,12 +277,14 @@ class PrologixSocketServer:
             mapping = self.config.get_mapping(curr_addr)
             if mapping and mapping.get("visa_address"):
                 visa_addr = mapping["visa_address"]
+                interface_lock = self.visa_manager.get_interface_lock(visa_addr)
                 def _exec_clear():
                     try:
                         res, res_lock = self.visa_manager.get_resource(visa_addr)
-                        with res_lock:
-                            if hasattr(res, "clear"):
-                                res.clear()
+                        with interface_lock:
+                            with res_lock:
+                                if hasattr(res, "clear"):
+                                    res.clear()
                     except Exception as e:
                         logger.warning("SOCKET_SERVER", f"Clear failed on {visa_addr}: {e}")
                 await asyncio.to_thread(_exec_clear)
@@ -294,20 +296,53 @@ class PrologixSocketServer:
             mapping = self.config.get_mapping(curr_addr)
             if mapping and mapping.get("visa_address"):
                 visa_addr = mapping["visa_address"]
+                interface_lock = self.visa_manager.get_interface_lock(visa_addr)
                 def _exec_trg():
                     try:
                         res, res_lock = self.visa_manager.get_resource(visa_addr)
-                        with res_lock:
-                            if hasattr(res, "assert_trigger"):
-                                res.assert_trigger()
-                            else:
-                                res.write("*TRG")
+                        with interface_lock:
+                            with res_lock:
+                                if hasattr(res, "assert_trigger"):
+                                    res.assert_trigger()
+                                else:
+                                    res.write("*TRG")
                     except Exception as e:
                         logger.warning("SOCKET_SERVER", f"Trigger failed on {visa_addr}: {e}")
                 await asyncio.to_thread(_exec_trg)
             return None
 
-        # 13. ++rst (Reset configurations to defaults)
+        # 13. ++llo, ++loc, ++ifc (GPIB Bus Control Actions - Always Return None)
+        elif cmd in ["llo", "loc", "ifc"]:
+            curr_addr = self.get_client_setting(client_addr, "addr")
+            mapping = self.config.get_mapping(curr_addr)
+            if mapping and mapping.get("visa_address"):
+                visa_addr = mapping["visa_address"]
+                interface_lock = self.visa_manager.get_interface_lock(visa_addr)
+                def _exec_bus_action():
+                    try:
+                        res, res_lock = self.visa_manager.get_resource(visa_addr)
+                        with interface_lock:
+                            with res_lock:
+                                if hasattr(res, "control_ren"):
+                                    if cmd == "loc":
+                                        res.control_ren(1)  # Go To Local (GTL)
+                                    elif cmd == "llo":
+                                        res.control_ren(3)  # Local Lockout (LLO)
+                    except Exception as e:
+                        logger.warning("SOCKET_SERVER", f"Bus action {cmd} failed on {visa_addr}: {e}")
+                await asyncio.to_thread(_exec_bus_action)
+            return None
+
+        # 14. ++lon, ++savecfg (Session state flags)
+        elif cmd in ["lon", "savecfg"]:
+            if arg is None:
+                return f"{self.get_client_setting(client_addr, cmd, 0)}\r\n"
+            else:
+                val = 1 if arg in ["1", "on", "true"] else 0
+                self.set_client_setting(client_addr, cmd, val)
+                return None
+
+        # 15. ++rst (Reset configurations to defaults)
         elif cmd == "rst":
             defaults = {
                 "addr": 1,
@@ -324,16 +359,7 @@ class PrologixSocketServer:
             logger.info("SOCKET_SERVER", f"[{client_addr[0]}:{client_addr[1]}] Reset settings to Prologix factory defaults.")
             return None
 
-        # 14. ++lon, ++savecfg, ++llo, ++loc, ++ifc (Prologix state flags)
-        elif cmd in ["lon", "savecfg", "llo", "loc", "ifc"]:
-            if arg is None:
-                return f"{self.get_client_setting(client_addr, cmd, 0)}\r\n"
-            else:
-                val = 1 if arg in ["1", "on", "true"] else 0
-                self.set_client_setting(client_addr, cmd, val)
-                return None
-
-        # 15. ++spoll (Serial poll)
+        # 16. ++spoll (Serial poll)
         elif cmd == "spoll":
             if arg is None:
                 addr_to_poll = self.get_client_setting(client_addr, "addr")
@@ -349,7 +375,7 @@ class PrologixSocketServer:
             stb_val = await self.perform_serial_poll(addr_to_poll)
             return f"{stb_val}\r\n"
 
-        # 16. ++help (Help text)
+        # 17. ++help (Help text)
         elif cmd == "help":
             help_text = (
                 "Prologix Emulator Command Help:\r\n"
@@ -359,6 +385,8 @@ class PrologixSocketServer:
                 "  ++read [eoi|<char>]   Read response from current instrument\r\n"
                 "  ++clr                 Send Selected Device Clear\r\n"
                 "  ++trg                 Send Group Execute Trigger (*TRG)\r\n"
+                "  ++loc                 Go To Local (GTL)\r\n"
+                "  ++llo                 Local Lockout (LLO)\r\n"
                 "  ++ver                 Query Prologix controller version\r\n"
                 "  ++eos [0|1|2|3]       Set/Query EOS formatting (0=CR+LF, 1=CR, 2=LF, 3=None)\r\n"
                 "  ++eoi [0|1]           Set/Query whether to assert EOI line\r\n"
@@ -403,7 +431,7 @@ class PrologixSocketServer:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
             logger.error("INSTR_ROUTING", f"[{client_addr[0]}:{client_addr[1]}] Failed to acquire connection to {visa_addr}: {e}")
-            return f"Error: Connection to physical instrument failed ({e})\r\n"
+            return None
 
         eos_terminator = self._get_eos_terminator(eos_val)
         command_with_term = command + eos_terminator
@@ -468,7 +496,7 @@ class PrologixSocketServer:
                     term = chr(eot_char) + term
                 return term
             else:
-                return f"Error: No instrument mapped to virtual address {curr_addr}.\r\n"
+                return None
 
         visa_addr = mapping.get("visa_address", "")
         if not visa_addr:
@@ -477,7 +505,8 @@ class PrologixSocketServer:
         try:
             res, res_lock = self.visa_manager.get_resource(visa_addr, timeout_ms=read_tmo_ms)
         except Exception as e:
-            return f"Error: Connect failed ({e})\r\n"
+            logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Connection failed to {visa_addr}: {e}")
+            return None
 
         interface_lock = self.visa_manager.get_interface_lock(visa_addr)
 
