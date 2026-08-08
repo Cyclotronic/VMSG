@@ -1,0 +1,22 @@
+{
+    "settings": {
+        "addr": 1,
+        "auto": 1,
+        "mode": 1,
+        "eos": 0,
+        "eoi": 1,
+        "read_tmo_ms": 3000,
+        "eot_enable": 0,
+        "eot_char": 4,
+        "lon": 0,
+        "savecfg": 1,
+        "unmapped_behavior": "message",
+        "auto_heal_usb": true,
+        "log_level": "WARN",
+        "enable_stdout": false,
+        "log_category_traffic": true,
+        "log_category_visa": true,
+        "log_category_system": true
+    },
+    "mappings": {}
+}
