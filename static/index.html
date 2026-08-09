@@ -89,16 +89,16 @@
     <div id="admin-drawer-overlay" class="fixed inset-0 bg-black/70 backdrop-blur-md z-40 hidden opacity-0 transition-opacity duration-300 ease-in-out"></div>
 
     <!-- Sliding Admin Panel Drawer -->
-    <div id="admin-drawer" class="fixed inset-y-0 left-0 w-[420px] max-w-[95vw] bg-slate-950/98 backdrop-blur-xl border-r border-white/10 z-50 transform -translate-x-full transition-transform duration-300 ease-in-out shadow-2xl flex flex-col text-slate-100">
+    <div id="admin-drawer" class="fixed inset-y-0 left-0 w-[420px] max-w-[95vw] bg-white/98 dark:bg-slate-950/98 backdrop-blur-xl border-r border-slate-200 dark:border-white/10 z-50 transform -translate-x-full transition-transform duration-300 ease-in-out shadow-2xl flex flex-col text-slate-800 dark:text-slate-100">
         <!-- Drawer Header -->
-        <div class="flex items-center justify-between p-5 border-b border-white/5 bg-slate-900/50 shrink-0">
-            <div class="flex items-center space-x-2 text-indigo-400">
+        <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-slate-900/50 shrink-0">
+            <div class="flex items-center space-x-2 text-cyber-indigo dark:text-indigo-400">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
-                <span class="font-title font-bold tracking-wider text-sm uppercase text-slate-200">Admin Settings Panel</span>
+                <span class="font-title font-bold tracking-wider text-sm uppercase text-slate-800 dark:text-slate-200">Admin Settings Panel</span>
             </div>
-            <button id="btn-close-admin" class="text-slate-400 hover:text-slate-100 transition p-1.5 hover:bg-white/5 rounded-lg">
+            <button id="btn-close-admin" class="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 transition p-1.5 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-lg">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -108,14 +108,14 @@
         <!-- Drawer Scrollable Content -->
         <div class="flex-grow overflow-y-auto p-5 space-y-6 scrollbar-thin">
             <!-- System Gateway Controls Widget -->
-            <section class="bg-slate-900/80 border border-white/10 rounded-2xl p-4 shadow-xl flex items-center justify-between glowing-border-amber">
+            <section class="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-white/10 rounded-2xl p-4 shadow-xl flex items-center justify-between glowing-border-amber">
                 <div class="flex items-center space-x-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-500 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
                     <div>
-                        <h2 class="font-title font-bold text-xs uppercase tracking-wider text-slate-200">Gateway Controls</h2>
-                        <p class="text-[10px] text-slate-400 font-mono">Service Power & Restart Operations</p>
+                        <h2 class="font-title font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">Gateway Controls</h2>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Service Power & Restart Operations</p>
                     </div>
                 </div>
                 <div class="flex items-center space-x-2">
@@ -136,31 +136,31 @@
             </section>
 
             <!-- Prologix Gateway Settings Form -->
-            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col">
-                <div class="flex flex-col mb-4 border-b border-white/5 pb-3">
+            <section class="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
+                <div class="flex flex-col mb-4 border-b border-slate-200 dark:border-white/5 pb-3">
                     <div class="flex items-center space-x-2">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0" />
                         </svg>
-                        <h2 class="font-title font-semibold tracking-wide text-slate-200">Global Prologix Controller Parameters</h2>
+                        <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">Global Prologix Controller Parameters</h2>
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">Global settings governing Prologix command behavior across socket transactions.</p>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">Global settings governing Prologix command behavior across socket transactions.</p>
                 </div>
 
                 <form id="settings-form" class="space-y-4">
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Read-After-Write <span class="text-cyber-indigo font-bold ml-1">++auto</span></label>
-                            <select id="set-auto" name="auto" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Read-After-Write <span class="text-cyber-indigo font-bold ml-1">++auto</span></label>
+                            <select id="set-auto" name="auto" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
                                 <option value="1">Enabled (1)</option>
                                 <option value="0">Disabled (0)</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Mode <span class="text-cyber-teal font-bold ml-1">++mode</span></label>
-                            <select id="set-mode" name="mode" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                            <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Mode <span class="text-cyber-teal font-bold ml-1">++mode</span></label>
+                            <select id="set-mode" name="mode" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
                                 <option value="1">Controller (1)</option>
                                 <option value="0">Device (0)</option>
                             </select>
@@ -215,18 +215,29 @@
 
                     <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3 mt-1 text-xs">
                         <div>
-                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Auto-Fix USB Port Shifts</label>
-                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Auto-heal moved ports on startup & scan (<code class="text-cyber-teal font-mono">auto_heal_usb</code>)</p>
-                        </div>
-                        <input type="checkbox" id="set-auto-heal-usb" name="auto_heal_usb" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
-                    </div>
-
-                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3 mt-1 text-xs">
-                        <div>
                             <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Scan Serial/COM Ports</label>
                             <p class="text-[10px] text-slate-500 dark:text-slate-400">Scan PyVISA ASRL serial ports during discovery (<code class="text-cyber-teal font-mono">scan_serial_ports</code>)</p>
                         </div>
                         <input type="checkbox" id="set-scan-serial-ports" name="scan_serial_ports" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3 mt-1 text-xs">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Dedicated Port Per Device</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Assigns each mapped slot its own dedicated listener port instead of single port 1234.</p>
+                        </div>
+                        <input type="checkbox" id="set-multi-port" name="multi_port_enabled" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div id="multi-port-controls" class="hidden space-y-2 border-t border-slate-200 dark:border-white/5 pt-2 text-xs">
+                        <div class="flex items-center space-x-2">
+                            <label class="text-[10px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">Base Port</label>
+                            <input type="number" id="set-multi-port-base" name="multi_port_base" min="1025" max="65000" class="w-24 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal rounded-lg px-2 py-1 text-xs font-mono outline-none text-slate-800 dark:text-slate-200">
+                            <button id="btn-assign-ports" type="button" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-cyber-border hover:border-cyber-teal text-slate-700 dark:text-slate-200 rounded-lg py-1.5 text-[11px] font-bold font-title tracking-wider transition duration-150">
+                                Assign Ports To All Slots
+                            </button>
+                        </div>
+                        <div id="port-binding-list" class="text-[10px] font-mono text-slate-500 dark:text-slate-400"></div>
                     </div>
 
                     <button type="submit" class="w-full bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-sm font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 hover:shadow-cyber-teal/20 active:scale-[0.98] transition duration-150 mt-2">
@@ -235,13 +246,13 @@
                 </form>
             </section>
 
-            <!-- Host Device Discovery & TestController Integration -->
+            <!-- TestController Integration Options -->
             <section class="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
                 <div class="flex items-center space-x-2 mb-4 border-b border-slate-200 dark:border-white/5 pb-3">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
                     </svg>
-                    <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">Host Discovery & TestController</h2>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">TestController Integration Options</h2>
                 </div>
 
                 <div class="space-y-3 text-xs">
@@ -257,37 +268,27 @@
                         <p class="text-[10px] text-slate-500 dark:text-slate-400">Loading host serial ports&hellip;</p>
                     </div>
 
-                    <div class="border-t border-slate-200 dark:border-white/5 pt-3">
-                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">TestController Devices Folder</label>
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
+                        <div>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Validate TestController Driver Files</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Optional: Filter exported driver names against TestController install files. Off exports all mapped devices as-is.</p>
+                        </div>
+                        <input type="checkbox" id="set-tc-enable-driver-validation" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <div id="tc-devices-path-container" class="border-t border-slate-200 dark:border-white/5 pt-3 hidden">
+                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">TestController Devices Folder (Optional)</label>
                         <input type="text" id="set-tc-devices-path" placeholder="C:\Users\you\Documents\TestController\Devices" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-xs font-mono outline-none transition duration-150 text-slate-800 dark:text-slate-200">
-                        <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Validates exported driver names against your install. Unknown names are excluded &mdash; TestController drops every device after one it cannot resolve.</p>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Tracks your actual TestController installation files when validation is enabled.</p>
                     </div>
 
                     <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
                         <div>
-                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Force Address On Reconnect</label>
-                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Adds <code class="text-cyber-teal font-mono">++addr N</code> to each controller's settings field so TestController re-addresses after a Reconnect.</p>
+                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Force Address On Reconnect / Enable ++addr</label>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Emits <code class="text-cyber-teal font-mono">settings:++addr N</code> in exported config so TestController target re-addresses after reconnects.</p>
+                            <p id="tc-force-addr-note" class="text-[10px] text-cyber-teal font-medium mt-1">* Auto-enabled when "Dedicated Port Per Device" is active so TestController maintains explicit address targeting.</p>
                         </div>
                         <input type="checkbox" id="set-tc-force-addr" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
-                    </div>
-
-                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
-                        <div>
-                            <label class="block font-mono font-bold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">Dedicated Port Per Device</label>
-                            <p class="text-[10px] text-slate-500 dark:text-slate-400">Each mapped slot gets its own listener, so clients need no <code class="text-cyber-teal font-mono">++addr</code> at all. Default off (single port 1234).</p>
-                        </div>
-                        <input type="checkbox" id="set-multi-port" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-teal focus:ring-0 w-4 h-4 cursor-pointer">
-                    </div>
-
-                    <div id="multi-port-controls" class="hidden space-y-2">
-                        <div class="flex items-center space-x-2">
-                            <label class="text-[10px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">Base Port</label>
-                            <input type="number" id="set-multi-port-base" min="1025" max="65000" class="w-24 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal rounded-lg px-2 py-1 text-xs font-mono outline-none text-slate-800 dark:text-slate-200">
-                            <button id="btn-assign-ports" type="button" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-cyber-border hover:border-cyber-teal text-slate-700 dark:text-slate-200 rounded-lg py-1.5 text-[11px] font-bold font-title tracking-wider transition duration-150">
-                                Assign Ports To All Slots
-                            </button>
-                        </div>
-                        <div id="port-binding-list" class="text-[10px] font-mono text-slate-500 dark:text-slate-400"></div>
                     </div>
 
                     <button id="btn-save-discovery" type="button" class="w-full bg-gradient-to-r from-cyber-indigo to-cyber-teal hover:opacity-95 text-white rounded-xl py-2.5 text-sm font-bold font-title tracking-wider shadow-lg shadow-cyber-teal/10 active:scale-[0.98] transition duration-150 mt-1">
@@ -297,20 +298,20 @@
             </section>
 
             <!-- Configuration Backup & Restore Widget -->
-            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
-                <div class="flex items-center space-x-2 mb-4 border-b border-white/5 pb-3">
+            <section class="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-teal">
+                <div class="flex items-center space-x-2 mb-4 border-b border-slate-200 dark:border-white/5 pb-3">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                     </svg>
-                    <h2 class="font-title font-semibold tracking-wide text-slate-200">Backup & Restore</h2>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">Backup & Restore</h2>
                 </div>
 
-                <p class="text-xs text-slate-400 mb-4 leading-relaxed font-sans">
+                <p class="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed font-sans">
                     Export your current Prologix settings and virtual GPIB mapping rules to a portable file, or upload a backup to restore configurations.
                 </p>
 
                 <div class="space-y-3">
-                    <button id="btn-download-backup" class="w-full bg-slate-800 hover:bg-slate-700 border border-cyber-border hover:border-cyber-teal text-slate-200 hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 flex items-center justify-center space-x-2 active:scale-[0.98]">
+                    <button id="btn-download-backup" class="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-cyber-border hover:border-cyber-teal text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 flex items-center justify-center space-x-2 active:scale-[0.98]">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-cyber-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
@@ -328,18 +329,18 @@
             </section>
 
             <!-- Logging & Verbosity Widget -->
-            <section class="bg-slate-900/50 border border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-indigo">
-                <div class="flex items-center space-x-2 mb-4 border-b border-white/5 pb-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <section class="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-xl flex flex-col glowing-border-indigo">
+                <div class="flex items-center space-x-2 mb-4 border-b border-slate-200 dark:border-white/5 pb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-cyber-indigo dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <h2 class="font-title font-semibold tracking-wide text-slate-200">Logging & Verbosity</h2>
+                    <h2 class="font-title font-semibold tracking-wide text-slate-800 dark:text-slate-200">Logging & Verbosity</h2>
                 </div>
 
                 <form id="logging-form" class="space-y-4">
                     <div>
-                        <label class="block text-xs font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Log Verbosity Level</label>
-                        <select id="set-log-level" name="log_level" class="w-full bg-slate-900 border border-cyber-border focus:border-cyber-indigo focus:ring-1 focus:ring-cyber-indigo rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-200">
+                        <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Log Verbosity Level</label>
+                        <select id="set-log-level" name="log_level" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-indigo focus:ring-1 focus:ring-cyber-indigo rounded-xl px-3 py-2 text-sm font-semibold outline-none transition duration-150 text-slate-800 dark:text-slate-200">
                             <option value="DEBUG">DEBUG (All logs, diagnostic)</option>
                             <option value="INFO">INFO (Default operational events)</option>
                             <option value="WARN">WARN (Warnings and errors only)</option>
@@ -347,37 +348,37 @@
                         </select>
                     </div>
 
-                    <div class="flex items-center justify-between border-t border-white/5 pt-3">
+                    <div class="flex items-center justify-between border-t border-slate-200 dark:border-white/5 pt-3">
                         <div class="flex flex-col pr-2">
-                            <span class="text-xs font-semibold text-slate-200">Terminal Stdout Logging</span>
-                            <span class="text-[10px] text-slate-400 leading-normal">Write log lines to terminal console (optionally enabled, disabled by default for silent Windows operation)</span>
+                            <span class="text-xs font-semibold text-slate-800 dark:text-slate-200">Terminal Stdout Logging</span>
+                            <span class="text-[10px] text-slate-500 dark:text-slate-400 leading-normal">Write log lines to terminal console (optionally enabled, disabled by default for silent Windows operation)</span>
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer select-none">
                             <input type="checkbox" id="set-enable-stdout" name="enable_stdout" class="sr-only peer">
-                            <div class="w-9 h-5 bg-slate-800 rounded-full peer peer-focus:ring-1 peer-focus:ring-cyber-indigo peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-indigo peer-checked:after:bg-white"></div>
+                            <div class="w-9 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-focus:ring-1 peer-focus:ring-cyber-indigo peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyber-indigo peer-checked:after:bg-white"></div>
                         </label>
                     </div>
 
-                    <div class="border-t border-white/5 pt-3 space-y-2.5">
-                        <span class="block text-xs font-mono font-medium text-slate-400 uppercase tracking-wider">Logged Categories</span>
+                    <div class="border-t border-slate-200 dark:border-white/5 pt-3 space-y-2.5">
+                        <span class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Logged Categories</span>
                         
-                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
-                            <input type="checkbox" id="set-log-traffic" name="log_category_traffic" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-traffic" name="log_category_traffic" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-indigo focus:ring-0">
                             <span>Client Socket Traffic (TRAFFIC_IN/OUT)</span>
                         </label>
                         
-                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
-                            <input type="checkbox" id="set-log-visa" name="log_category_visa" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-visa" name="log_category_visa" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-indigo focus:ring-0">
                             <span>VISA Interactions (WRITE/READ/SCAN)</span>
                         </label>
                         
-                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-300 hover:text-slate-200 transition">
-                            <input type="checkbox" id="set-log-system" name="log_category_system" class="rounded border-cyber-border bg-slate-900 text-cyber-indigo focus:ring-0">
+                        <label class="flex items-center space-x-2.5 cursor-pointer text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-200 transition">
+                            <input type="checkbox" id="set-log-system" name="log_category_system" class="rounded border-slate-300 dark:border-cyber-border bg-white dark:bg-slate-900 text-cyber-indigo focus:ring-0">
                             <span>Main loop & System Events (MAIN/API)</span>
                         </label>
                     </div>
 
-                    <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 border border-cyber-border hover:border-cyber-indigo text-slate-300 hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 active:scale-[0.98]">
+                    <button type="submit" class="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-cyber-border hover:border-cyber-indigo text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white rounded-xl py-2.5 text-xs font-bold font-title tracking-wider transition duration-150 active:scale-[0.98]">
                         Apply Logging Filters
                     </button>
                 </form>
@@ -643,7 +644,7 @@
                     <label class="block text-xs font-mono font-medium text-slate-500 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Identity String (*IDN? fingerprint)</label>
                     <input type="text" id="modal-idn-pattern" placeholder="e.g. HEWLETT-PACKARD,34401A" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-cyber-border focus:border-cyber-teal focus:ring-1 focus:ring-cyber-teal rounded-xl px-3 py-2 text-sm outline-none transition text-slate-800 dark:text-slate-100 font-mono">
                     <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                        Matches this substring against active VISA query responses on startup or healing to auto-recover physical ports if they switch.
+                        Identity substring recorded from the instrument's *IDN? response. Used to label the slot and to pick a TestController driver on export.
                     </p>
                 </div>
 
@@ -1092,7 +1093,7 @@
             for (let i = 0; i <= 30; i++) {
                 const isAddressed = (i === appState.settings.addr);
                 const mapping = appState.mappings[i.toString()];
-                
+
                 const card = document.createElement('div');
                 card.className = `glass-panel rounded-2xl p-3.5 flex flex-col justify-between cursor-pointer border hover:scale-[1.03] transition-all duration-200 ${
                     isAddressed 
@@ -1110,11 +1111,6 @@
                             <span class="text-xs font-mono font-bold px-2 py-0.5 rounded ${isAddressed ? 'bg-cyber-teal/20 text-cyber-teal' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}">${i}</span>
                             <div class="flex items-center space-x-1">
                                 ${i === 0 ? '<span class="text-[9px] font-mono tracking-wide px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-500 bg-amber-500/10 font-bold" title="Address 0 is reserved for the Prologix Controller. Avoid instrument mapping.">Avoid 0</span>' : ''}
-                                <button title="Heal Mapped USB Port" onclick="event.stopPropagation(); healSingleSlot(${i})" class="p-1 hover:bg-cyber-emerald/15 border border-transparent hover:border-cyber-emerald/35 text-slate-400 hover:text-cyber-emerald rounded-md transition duration-150">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                    </svg>
-                                </button>
                                 <button title="Snoop Traffic (Spy)" onclick="event.stopPropagation(); openSnoopMonitor(${i})" class="p-1 hover:bg-cyber-teal/15 border border-transparent hover:border-cyber-teal/35 text-slate-400 hover:text-cyber-teal rounded-md transition duration-150">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -1209,9 +1205,6 @@
                     document.getElementById('set-unmapped-behavior').value = appState.settings.unmapped_behavior || 'message';
                     document.getElementById('set-eot-enable').value = appState.settings.eot_enable;
                     document.getElementById('set-eot-char').value = appState.settings.eot_char;
-                    if (document.getElementById('set-auto-heal-usb')) {
-                        document.getElementById('set-auto-heal-usb').checked = appState.settings.auto_heal_usb !== false;
-                    }
                     if (document.getElementById('set-scan-serial-ports')) {
                         document.getElementById('set-scan-serial-ports').checked = !!appState.settings.scan_serial_ports;
                     }
@@ -1306,7 +1299,6 @@
                 else if (log.category === 'SOCKET_SERVER') catColor = 'text-cyber-amber dark:text-amber-500';
                 else if (log.category === 'INSTR_WRITE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
                 else if (log.category === 'INSTR_READ') catColor = 'text-teal-600 dark:text-teal-400 font-semibold';
-                else if (log.category === 'HEALER') catColor = 'text-cyber-emerald dark:text-emerald-400 font-bold';
                 else if (log.category === 'CONSOLE') catColor = 'text-indigo-600 dark:text-indigo-400 font-semibold';
                 
                 let levelColor = 'text-slate-500 dark:text-slate-400';
@@ -1336,18 +1328,17 @@
             formData.forEach((value, key) => {
                 if (key === 'unmapped_behavior') {
                     payload[key] = value;
-                } else if (key === 'auto_heal_usb' || key === 'scan_serial_ports') {
+                } else if (key === 'scan_serial_ports' || key === 'multi_port_enabled') {
                     payload[key] = true;
                 } else {
                     payload[key] = parseInt(value);
                 }
             });
-            if (!formData.has('auto_heal_usb')) {
-                payload['auto_heal_usb'] = false;
-            }
-            if (!formData.has('scan_serial_ports')) {
-                payload['scan_serial_ports'] = false;
-            }
+            if (!formData.has('scan_serial_ports')) payload['scan_serial_ports'] = false;
+            if (!formData.has('multi_port_enabled')) payload['multi_port_enabled'] = false;
+
+            const tcForceAddr = document.getElementById('set-tc-force-addr');
+            if (tcForceAddr) payload['tc_force_addr'] = tcForceAddr.checked;
 
             try {
                 const res = await fetch('/api/settings', {
@@ -1421,6 +1412,12 @@
         function syncDiscoveryPanel() {
             const s = appState.settings || {};
             const el = id => document.getElementById(id);
+            if (el('set-tc-enable-driver-validation')) {
+                el('set-tc-enable-driver-validation').checked = !!s.tc_enable_driver_validation;
+            }
+            if (el('tc-devices-path-container')) {
+                el('tc-devices-path-container').classList.toggle('hidden', !s.tc_enable_driver_validation);
+            }
             if (el('set-tc-scan-serial')) el('set-tc-scan-serial').checked = !!s.tc_scan_serial_ports;
             if (el('set-tc-force-addr')) el('set-tc-force-addr').checked = s.tc_force_addr !== false;
             if (el('set-multi-port')) el('set-multi-port').checked = !!s.multi_port_enabled;
@@ -1441,14 +1438,27 @@
             }
         }
 
+        if (document.getElementById('set-tc-enable-driver-validation')) {
+            document.getElementById('set-tc-enable-driver-validation').onchange = (e) => {
+                const container = document.getElementById('tc-devices-path-container');
+                if (container) container.classList.toggle('hidden', !e.target.checked);
+            };
+        }
+
         document.getElementById('set-multi-port').onchange = (e) => {
-            document.getElementById('multi-port-controls').classList.toggle('hidden', !e.target.checked);
+            const controls = document.getElementById('multi-port-controls');
+            if (controls) controls.classList.toggle('hidden', !e.target.checked);
+            if (e.target.checked) {
+                const tcForceAddr = document.getElementById('set-tc-force-addr');
+                if (tcForceAddr) tcForceAddr.checked = true;
+            }
         };
 
         document.getElementById('btn-save-discovery').onclick = async () => {
             const excluded = Array.from(document.querySelectorAll('.tc-serial-exclude'))
                 .filter(cb => cb.checked).map(cb => cb.dataset.device).join(',');
             const payload = {
+                tc_enable_driver_validation: document.getElementById('set-tc-enable-driver-validation') ? document.getElementById('set-tc-enable-driver-validation').checked : false,
                 tc_scan_serial_ports: document.getElementById('set-tc-scan-serial').checked,
                 tc_force_addr: document.getElementById('set-tc-force-addr').checked,
                 tc_devices_path: document.getElementById('set-tc-devices-path').value.trim(),
@@ -1505,27 +1515,6 @@
             await fetchState();
             await refreshPortBindings();
         };
-
-        async function healSingleSlot(slot) {
-            appendConsoleMessage('SYSTEM', `Checking USB port healing for virtual slot ${slot}...`);
-            try {
-                const res = await fetch(`/api/heal?slot=${slot}`, { method: 'POST' });
-                const data = await res.json();
-                if (res.ok) {
-                    if (data.healed_count > 0) {
-                        const action = data.actions[0];
-                        appendConsoleMessage('SYSTEM', `✔ Slot ${action.virtual_address} Healed: ${action.old_visa_address} ➔ ${action.new_visa_address}`);
-                        fetchState();
-                    } else {
-                        appendConsoleMessage('SYSTEM', `Slot ${slot} verified: device is present and active at mapped port.`);
-                    }
-                } else {
-                    appendConsoleMessage('ERROR', `Heal slot ${slot} failed: ${data.detail}`, true);
-                }
-            } catch (err) {
-                appendConsoleMessage('ERROR', `Heal slot ${slot} failed: ${err}`, true);
-            }
-        }
 
         // Setup logging form apply
         document.getElementById('logging-form').onsubmit = async (e) => {
@@ -1732,39 +1721,6 @@
                 } finally {
                     btnScanEl.disabled = false;
                     btnScanEl.classList.remove('opacity-70');
-                }
-            };
-        }
-
-        // Heal Mappings button
-        const btnHealEl = document.getElementById('btn-heal');
-        if (btnHealEl) {
-            btnHealEl.onclick = async () => {
-                btnHealEl.disabled = true;
-                btnHealEl.classList.add('opacity-70');
-                appendConsoleMessage('SYSTEM', 'Initiating automated USB Lottery Healing matching...');
-
-                try {
-                    const res = await fetch('/api/heal', { method: 'POST' });
-                    const data = await res.json();
-                    if (res.ok) {
-                        if (data.healed_count > 0) {
-                            appendConsoleMessage('SYSTEM', `HEALED ${data.healed_count} mappings successfully!`);
-                            data.actions.forEach(action => {
-                                appendConsoleMessage('SYSTEM', `✔ Slot ${action.virtual_address}: ${action.old_visa_address} -> ${action.new_visa_address} [${action.matched_idn.split(',')[1]}]`);
-                            });
-                            fetchState();
-                        } else {
-                            appendConsoleMessage('SYSTEM', 'Lottery healing executed. All mapped devices verified at their expected ports (0 changes).');
-                        }
-                    } else {
-                        appendConsoleMessage('ERROR', `Healer failed: ${data.detail}`, true);
-                    }
-                } catch (err) {
-                    appendConsoleMessage('ERROR', `Healer failed: ${err}`, true);
-                } finally {
-                    btnHealEl.disabled = false;
-                    btnHealEl.classList.remove('opacity-70');
                 }
             };
         }

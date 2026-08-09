@@ -59,8 +59,8 @@ async def main():
     # Print startup banner directly to console
     print("================================================================================")
     print("  VISA Mapping TCP/IP Socket Gateway (VMSG) v1.0.0")
-    print(f"  Prologix Control Socket : tcp://0.0.0.0:1234")
-    print(f"  Web Dashboard & REST API : http://localhost:8080")
+    print("  Prologix Control Socket : tcp://0.0.0.0:1234")
+    print("  Web Dashboard & REST API : http://localhost:8080")
     print(f"  Config File Path         : {config.filepath}")
     visalib_str = str(getattr(visa.rm, "visalib", ""))
     backend_type = "Pure-Python (@py)" if ("py" in visalib_str.lower()) else ("NI-VISA System" if visa.rm else "None (Mock Only)")
@@ -70,35 +70,6 @@ async def main():
     logger.info("MAIN", "Starting servers...")
     
     # Run socket server and web server concurrently
-    bg_tasks = set()
-
-    # 6. Run USB Lottery Healing asynchronously after servers are up
-    async def _async_startup_healing():
-        await asyncio.sleep(0.5)
-        logger.info("HEALER", "Executing startup automated USB Lottery Healing...")
-        try:
-            mappings = config.get_mappings()
-            healing_actions = await asyncio.to_thread(visa.heal_mappings, mappings)
-            for action in healing_actions:
-                addr = action["virtual_address"]
-                new_addr = action["new_visa_address"]
-                mapping_entry = mappings.get(str(addr), {})
-                config.set_mapping(
-                    address=addr,
-                    visa_address=new_addr,
-                    idn_pattern=mapping_entry.get("idn_pattern", ""),
-                    description=mapping_entry.get("description", "")
-                )
-                logger.info("HEALER", f"Auto-Healed Address {addr} on startup: {action['old_visa_address']} -> {new_addr}")
-            if not healing_actions:
-                logger.info("HEALER", "All expected instruments are present and verified at their ports.")
-        except Exception as e:
-            logger.warning("HEALER", f"Startup Lottery Healing encountered an issue: {e}")
-
-    task = asyncio.create_task(_async_startup_healing())
-    bg_tasks.add(task)
-    task.add_done_callback(bg_tasks.discard)
-
     socket_task = asyncio.create_task(socket_server.start())
     web_task = asyncio.create_task(uvicorn_server.serve())
 

@@ -49,7 +49,7 @@ class SystemLogger:
         if cat_upper in ["TRAFFIC_IN", "TRAFFIC_OUT"]:
             if not self.log_category_traffic:
                 return
-        elif cat_upper in ["INSTR_WRITE", "INSTR_READ", "SCAN", "HEALER", "VISAMANAGER"]:
+        elif cat_upper in ["INSTR_WRITE", "INSTR_READ", "SCAN", "VISAMANAGER"]:
             if not self.log_category_visa:
                 return
         else:

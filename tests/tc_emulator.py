@@ -12,8 +12,7 @@ Drives VMSG exactly the way TestController's PrologixEthernet
 
 Config is parsed from the files VMSG actually exported.
 """
-import socket, struct, threading, time, re, sys
-from collections import defaultdict
+import socket, struct, time, re
 
 HOST, PORT = "127.0.0.1", 1234
 

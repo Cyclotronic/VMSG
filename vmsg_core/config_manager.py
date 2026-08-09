@@ -22,9 +22,9 @@ DEFAULT_CONFIG = {
         "lon": 0,
         "savecfg": 1,
         "unmapped_behavior": "message",
-        "auto_heal_usb": True,
         "scan_serial_ports": False,
         # TestController export controls
+        "tc_enable_driver_validation": False,
         "tc_scan_serial_ports": False,
         "tc_excluded_serial_ports": "",
         "tc_force_addr": True,
@@ -173,7 +173,7 @@ class ConfigManager:
                         val = int(v)
                         if 0 <= val <= 255:
                             self.config["settings"][k] = val
-                    elif k in ["tc_scan_serial_ports", "tc_force_addr", "multi_port_enabled"]:
+                    elif k in ["tc_enable_driver_validation", "tc_scan_serial_ports", "tc_force_addr", "multi_port_enabled"]:
                         self.config["settings"][k] = True if v else False
                     elif k == "multi_port_base":
                         val = int(v)

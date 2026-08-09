@@ -1,11 +1,9 @@
 import time
 import threading
 import random
-import re
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 import pyvisa
-from pyvisa.errors import VisaIOError
 from .logger import logger
 
 class MockVisaResource:
@@ -91,7 +89,7 @@ class MockVisaResource:
 
 
 class VisaManager:
-    """Manages active PyVISA connections, resource pooling, and auto-healing."""
+    """Manages active PyVISA connections and resource pooling."""
     def __init__(self):
         self.lock = threading.Lock()
         self.global_visa_lock = threading.Lock()  # Hardware bus fallback lock
@@ -99,7 +97,8 @@ class VisaManager:
         self.resource_cache: Dict[str, Any] = {}
         self.resource_locks: Dict[str, threading.Lock] = {}
         self.pending_opens: Dict[str, threading.Event] = {}
-        self.unresponsive_cache: Dict[str, float] = {}  # visa_address -> last_fail_timestamp
+        # visa_address -> {"time": last_fail_timestamp, "count": consecutive_failures}
+        self.unresponsive_cache: Dict[str, Dict[str, float]] = {}
         self.unresponsive_lock = threading.Lock()
         self.rm: Optional[pyvisa.ResourceManager] = None
         
@@ -140,28 +139,40 @@ class VisaManager:
             logger.error("VISAMANAGER", f"Error listing physical resources: {e}")
             return []
 
-    def get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
-        """
-        Retrieves a thread-safe connection to the requested VISA address.
-        If address starts with 'MOCK::', returns a simulated resource.
-        NOTE: Must be called from a worker thread or via async_get_resource on event loop.
-        """
-        if not visa_address:
-            raise ValueError("Empty VISA address")
+    # Cooldown escalation: each successive failure backs off further, but never so far
+    # that a working instrument stays fast-failed for long. A single hiccup must not
+    # take a healthy device out of service - that is why the steps start small.
+    _COOLDOWN_STEPS = (2.0, 5.0, 15.0, 30.0)
 
-    def _record_unresponsive_failure(self, visa_address: str) -> None:
+    def _cooldown_for(self, count: int) -> float:
+        idx = min(max(count, 1), len(self._COOLDOWN_STEPS)) - 1
+        return self._COOLDOWN_STEPS[idx]
+
+    def _record_unresponsive_failure(self, visa_address: str, reason: str = "") -> None:
+        """Records a failed access so subsequent calls fast-fail briefly instead of blocking.
+
+        Always logs: a silent cooldown makes a healthy-but-busy instrument look dead
+        with nothing in the log to explain why.
+        """
         if visa_address.upper().startswith("MOCK::"):
             return
         with self.unresponsive_lock:
             entry = self.unresponsive_cache.get(visa_address)
-            now = time.time()
-            if isinstance(entry, dict):
-                count = entry.get("count", 0) + 1
-            elif isinstance(entry, (int, float)):
-                count = 2
-            else:
-                count = 1
-            self.unresponsive_cache[visa_address] = {"time": now, "count": count}
+            count = (entry["count"] + 1) if entry else 1
+            self.unresponsive_cache[visa_address] = {"time": time.time(), "count": count}
+        cooldown = self._cooldown_for(count)
+        detail = f" ({reason})" if reason else ""
+        logger.warning(
+            "VISAMANAGER",
+            f"{visa_address} marked unresponsive{detail}; failure #{count}, "
+            f"fast-failing for {cooldown:.0f}s"
+        )
+
+    def clear_unresponsive(self, visa_address: str) -> None:
+        """Clears any cooldown on a resource after a known-good access."""
+        with self.unresponsive_lock:
+            if self.unresponsive_cache.pop(visa_address, None) is not None:
+                logger.info("VISAMANAGER", f"{visa_address} responded; cooldown cleared.")
 
     def _is_unresponsive(self, visa_address: str) -> bool:
         if visa_address.upper().startswith("MOCK::"):
@@ -170,18 +181,7 @@ class VisaManager:
             entry = self.unresponsive_cache.get(visa_address)
             if not entry:
                 return False
-            now = time.time()
-            if isinstance(entry, dict):
-                last_time = entry.get("time", 0)
-                count = entry.get("count", 1)
-            else:
-                last_time = float(entry)
-                count = 2
-            
-            # 1st failure: short 5.0s cooldown (allows quick retry for slow instruments)
-            # 2nd+ failure: 120.0s cooldown (fast-fails permanently dead devices)
-            cooldown_period = 5.0 if count == 1 else 120.0
-            return (now - last_time) < cooldown_period
+            return (time.time() - entry["time"]) < self._cooldown_for(entry["count"])
 
     def get_resource(self, visa_address: str, timeout_ms: int = 3000) -> Tuple[Any, Optional[threading.Lock]]:
         """
@@ -191,9 +191,6 @@ class VisaManager:
         """
         if not visa_address:
             raise ValueError("Empty VISA address")
-
-        if self._is_unresponsive(visa_address):
-            raise RuntimeError(f"Resource {visa_address} is recently unresponsive (cooldown active).")
 
         while True:
             with self.lock:
@@ -210,6 +207,14 @@ class VisaManager:
                         pass
                     return resource, res_lock
 
+            # The cooldown guards the *open* path only. Handing back an already-open
+            # handle costs nothing, so a probe that timed out (a scan losing a race for
+            # a busy bus, say) must not deny a working handle to client traffic - if the
+            # instrument really is gone, the caller's own VISA timeout reports it.
+            if self._is_unresponsive(visa_address):
+                raise RuntimeError(f"Resource {visa_address} is recently unresponsive (cooldown active).")
+
+            with self.lock:
                 if visa_address.upper().startswith("MOCK::"):
                     resource = MockVisaResource(visa_address)
                     resource.timeout = timeout_ms
@@ -250,8 +255,7 @@ class VisaManager:
                 self.resource_cache[visa_address] = resource
                 self.pending_opens.pop(visa_address, None)
                 open_event.set()
-            with self.unresponsive_lock:
-                self.unresponsive_cache.pop(visa_address, None)
+            self.clear_unresponsive(visa_address)
 
             logger.info("VISAMANAGER", f"Connected and cached physical resource: {visa_address}")
             return resource, res_lock
@@ -259,7 +263,7 @@ class VisaManager:
             with self.lock:
                 self.pending_opens.pop(visa_address, None)
                 open_event.set()
-            self._record_unresponsive_failure(visa_address)
+            self._record_unresponsive_failure(visa_address, f"open failed: {e}")
             logger.error("VISAMANAGER", f"Error opening VISA resource {visa_address}: {e}")
             raise
 
@@ -272,7 +276,21 @@ class VisaManager:
                 timeout=connect_budget_s
             )
         except asyncio.TimeoutError:
-            self._record_unresponsive_failure(visa_address)
+            # An already-open resource that blew the budget says nothing about the
+            # instrument - we never reached it. Blaming the device here fast-fails a
+            # healthy instrument for a scheduling delay on our side.
+            with self.lock:
+                already_open = visa_address in self.resource_cache
+            if already_open:
+                logger.warning(
+                    "VISAMANAGER",
+                    f"Timed out acquiring cached handle for {visa_address} within "
+                    f"{connect_budget_s:.1f}s (gateway contention, not the instrument)."
+                )
+            else:
+                self._record_unresponsive_failure(
+                    visa_address, f"connect exceeded {connect_budget_s:.1f}s budget"
+                )
             raise
 
     def purge_resource(self, visa_address: str) -> None:
@@ -312,42 +330,57 @@ class VisaManager:
         return True
 
     def query_idn(self, visa_address: str, timeout_ms: int = 1500, force: bool = False) -> Optional[str]:
-        """Queries *IDN? of a resource with safety, returning None if failure."""
+        """Queries *IDN? of a resource with safety, returning None if failure.
+
+        Takes the interface lock as well as the resource lock. A scan shares the
+        physical bus with live client traffic, so an unsynchronised *IDN? here can
+        land between another device's write and its read and be picked up as that
+        device's answer. Lock order (interface then resource) matches the socket
+        server's transaction path - reversing it would deadlock.
+        """
         is_mock = visa_address.upper().startswith("MOCK::")
-        
+
         if not is_mock and not force:
             if self._is_unresponsive(visa_address):
                 return None
 
         try:
             res, res_lock = self.get_resource(visa_address, timeout_ms=timeout_ms)
-        except Exception:
-            self._record_unresponsive_failure(visa_address)
+        except Exception as e:
+            self._record_unresponsive_failure(visa_address, f"scan could not open: {e}")
             return None
 
-        with res_lock:
+        interface_lock = None if is_mock else self.get_interface_lock(visa_address)
+
+        def _do_query() -> str:
+            old_timeout = getattr(res, "timeout", timeout_ms)
             try:
-                old_timeout = getattr(res, "timeout", timeout_ms)
-                try:
-                    res.timeout = timeout_ms
-                except Exception:
-                    pass
-                
+                res.timeout = timeout_ms
+            except Exception:
+                pass
+            try:
                 res.write("*IDN?")
-                idn = res.read().strip()
-                
+                return res.read().strip()
+            finally:
                 try:
                     res.timeout = old_timeout
                 except Exception:
                     pass
-                
-                with self.unresponsive_lock:
-                    self.unresponsive_cache.pop(visa_address, None)
-                        
-                return idn
-            except Exception:
-                self._record_unresponsive_failure(visa_address)
-                return None
+
+        try:
+            if interface_lock is None:
+                with res_lock:
+                    idn = _do_query()
+            else:
+                with interface_lock:
+                    with res_lock:
+                        idn = _do_query()
+        except Exception as e:
+            self._record_unresponsive_failure(visa_address, f"*IDN? failed: {e}")
+            return None
+
+        self.clear_unresponsive(visa_address)
+        return idn
 
     def scan_all_hardware(self, scan_serial: bool = False) -> List[Dict[str, str]]:
         """
@@ -361,7 +394,9 @@ class VisaManager:
             if not self.is_scannable_resource(r, scan_serial=scan_serial):
                 continue
 
-            idn = self.query_idn(r, timeout_ms=300, force=False)
+            # 300 ms was too tight: an instrument mid-integration (e.g. NPLC 10) answers
+            # well after that, so a present device got logged offline and cooled down.
+            idn = self.query_idn(r, timeout_ms=1000, force=False)
             discovered.append({
                 "visa_address": r,
                 "idn": idn or "Unknown / No Response",
@@ -394,58 +429,6 @@ class VisaManager:
         serial = parts[2] if len(parts) > 2 and parts[2] not in ("", "0") else ""
         return f"{model},{serial}" if serial else model
 
-    def heal_mappings(self, current_mappings: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
-        """
-        USB Lottery Healing:
-        Compares expected IDN patterns against active devices. Refuses ambiguous
-        healing if multiple online devices match the pattern.
-        """
-        healing_actions: List[Dict[str, Any]] = []
-        if not current_mappings:
-            return healing_actions
 
-        scanned_devices = self.scan_all_hardware()
-        scanned_online = [d for d in scanned_devices if d["status"] == "online" and d["idn"]]
-        scanned_by_addr = {d["visa_address"]: d["idn"] for d in scanned_online}
-
-        for addr_str, mapping in current_mappings.items():
-            expected_visa_addr = mapping.get("visa_address", "")
-            idn_pattern = mapping.get("idn_pattern", "").strip()
-            description = mapping.get("description", "")
-
-            if not idn_pattern:
-                continue
-
-            # Look up existing scan result first to avoid redundant query
-            current_idn = scanned_by_addr.get(expected_visa_addr)
-            if not current_idn:
-                current_idn = self.query_idn(expected_visa_addr, timeout_ms=500)
-
-            if current_idn and idn_pattern.lower() in current_idn.lower():
-                continue
-
-            matches = [
-                dev for dev in scanned_online
-                if idn_pattern.lower() in dev["idn"].lower()
-            ]
-            
-            if len(matches) > 1:
-                logger.warning("HEALER", f"Healing skipped for slot {addr_str}: IDN pattern '{idn_pattern}' matches multiple active devices.")
-                continue
-
-            if len(matches) == 1:
-                found_dev = matches[0]
-                found_new_address = found_dev["visa_address"]
-                if found_new_address != expected_visa_addr:
-                    healing_actions.append({
-                        "virtual_address": int(addr_str),
-                        "description": description,
-                        "idn_pattern": idn_pattern,
-                        "old_visa_address": expected_visa_addr,
-                        "new_visa_address": found_new_address,
-                        "matched_idn": found_dev["idn"]
-                    })
-
-        return healing_actions
 
 

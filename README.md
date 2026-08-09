@@ -91,7 +91,7 @@ To help you navigate the codebase, here is what each file does:
 
 | File | Description |
 | :--- | :--- |
-| 🚀 **`vmsg.py`** | **Primary Entry Point** (formerly `main.py`). Boots the unified servers, runs USB healing, and mounts both the TCP socket server and FastAPI. |
+| 🚀 **`vmsg.py`** | **Primary Entry Point** (formerly `main.py`). Boots the unified servers and mounts both the TCP socket server and FastAPI. |
 | 🖥️ **`web_app.py`** | Implements the FastAPI REST endpoints for statuses, configuration backups/restores, scans, and mapping controls. |
 | 🔌 **`prologix_server.py`** | Low-latency TCP socket server (port 1234) implementing standard & extended Prologix command parsers. |
 | 🎛️ **`visa_manager.py`** | Manages pyvisa sessions, resource pooling, unresponsive port cooldown caching, and simulated device mocks. |
@@ -104,10 +104,10 @@ To help you navigate the codebase, here is what each file does:
 
 ## 🏗️ Architecture & Advanced Features
 
-### High-Performance Resource Pooling & Healing
+### High-Performance Resource Pooling
 * **Persistent Sessions**: PyVISA connections are cached and reused globally instead of opening/closing on every byte transfer, completely eliminating connection overhead.
-* **USB Lottery Healing**: Scans active physical VISA connections and checks them against target manufacturers via `*IDN?` responses. If a reboot or system event shifts device paths, the gateway auto-corrects mapping addresses in-place.
-* **Unresponsive Cooldown Caching**: Ports that timeout or fail to respond are blacklisted for 120 seconds to prevent scanning routines from locking up the interface.
+* **Unresponsive Cooldown Caching**: Ports that time out or fail to respond are briefly fast-failed so scanning routines cannot lock up the interface. The cooldown escalates with consecutive failures (2s → 5s → 15s → 30s) and is cleared on the first successful access, so a momentarily busy instrument is not taken out of service. Every cooldown is logged with the reason that triggered it.
+* **Bus-Safe Scanning**: `*IDN?` probes take the same per-interface lock as client traffic, so a hardware scan cannot interleave with an in-flight transaction on a shared bus (e.g. GPIB).
 
 ### High-Fidelity Device Mocks
 No physical hardware? No problem. The gateway includes built-in interactive simulated instruments:

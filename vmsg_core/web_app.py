@@ -1,7 +1,7 @@
 import os
 import asyncio
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Body, APIRouter
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +15,7 @@ from .path_helper import get_resource_path
 
 class MappingModel(BaseModel):
     visa_address: str = Field(..., description="The physical or mock VISA resource string")
-    idn_pattern: str = Field("", description="Substring to look for in IDN response for USB auto-healing")
+    idn_pattern: str = Field("", description="Identity substring from the instrument's *IDN? response")
     description: str = Field("", description="Human-readable label for the instrument")
     listen_port: Optional[int] = Field(None, ge=1025, le=65000, description="Dedicated TCP listener port for this slot (multi-port mode)")
 
@@ -31,8 +31,8 @@ class SettingsModel(BaseModel):
     lon: Optional[int] = Field(None, ge=0, le=1)
     savecfg: Optional[int] = Field(None, ge=0, le=1)
     unmapped_behavior: Optional[str] = Field(None, description="Behavior for unmapped virtual addresses: 'message' or 'timeout'")
-    auto_heal_usb: Optional[bool] = Field(None, description="Toggle auto USB lottery healing")
     scan_serial_ports: Optional[bool] = Field(None, description="Toggle PyVISA scanning of ASRL serial/COM ports")
+    tc_enable_driver_validation: Optional[bool] = Field(None, description="Optionally validate TestController driver names against Devices folder or stock list")
     tc_scan_serial_ports: Optional[bool] = Field(None, description="Emit ScanSerialPorts:1 in the TestController export")
     tc_excluded_serial_ports: Optional[str] = Field(None, description="Comma-separated host serial ports TestController should skip")
     tc_force_addr: Optional[bool] = Field(None, description="Emit settings:++addr N so TestController re-addresses on every reconnect")
@@ -290,7 +290,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             logger.error("WEB_API", f"Config restore failed: {e}")
             raise HTTPException(status_code=500, detail=f"Restore failed: {e}")
 
-    # 4. VISA Hardware Discovery & Lottery Healing
+    # 4. VISA Hardware Discovery
     @api.get("/scan")
     def scan_hardware():
         """Scans all connected instruments and queries *IDN? responses."""
@@ -303,44 +303,6 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         except Exception as e:
             logger.error("WEB_API", f"Hardware scanning failed: {e}")
             raise HTTPException(status_code=500, detail=f"Scan failed: {e}")
-
-    @api.post("/heal")
-    def trigger_healing(slot: Optional[int] = None):
-        """Runs lottery healing based on currently configured IDN fingerprints."""
-        try:
-            logger.info("WEB_API", f"Triggering USB Lottery Healing (Slot filter: {slot})...")
-            mappings = app.state.config.get_mappings()
-            
-            if slot is not None:
-                slot_str = str(slot)
-                mappings = {slot_str: mappings[slot_str]} if slot_str in mappings else {}
-
-            healing_actions = app.state.visa.heal_mappings(mappings)
-            
-            # Apply healing actions in-place
-            for action in healing_actions:
-                addr = action["virtual_address"]
-                new_addr = action["new_visa_address"]
-                mapping_entry = app.state.config.get_mapping(addr)
-                if mapping_entry:
-                    app.state.config.set_mapping(
-                        address=addr,
-                        visa_address=new_addr,
-                        idn_pattern=mapping_entry["idn_pattern"],
-                        description=mapping_entry["description"],
-                        listen_port=mapping_entry.get("listen_port")
-                    )
-                    logger.info("HEALER", f"Healed Address {addr}: {action['old_visa_address']} -> {new_addr}")
-
-            return {
-                "status": "success",
-                "healed_count": len(healing_actions),
-                "actions": healing_actions,
-                "current_mappings": app.state.config.get_mappings()
-            }
-        except Exception as e:
-            logger.error("WEB_API", f"Lottery healing failed: {e}")
-            raise HTTPException(status_code=500, detail=f"Healing failed: {e}")
 
     @api.post("/auto_assign")
     async def auto_assign_devices(data: AutoAssignModel):
@@ -474,7 +436,11 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
 
     def _load_tc_driver_names() -> tuple:
         """Valid TestController driver names, read from the user's Devices folder when
-        configured so the check tracks their actual install; falls back to the built-in set."""
+        configured so the check tracks their actual install; returns None if driver
+        validation is disabled."""
+        if not bool(app.state.config.get_setting("tc_enable_driver_validation", False)):
+            return None, "disabled"
+
         path = (app.state.config.get_setting("tc_devices_path", "") or "").strip()
         if path and os.path.isdir(path):
             names = set()
@@ -496,12 +462,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         return KNOWN_TC_DRIVERS, "builtin"
 
     def _map_to_testcontroller_driver(idn: str, visa_address: str, description: str) -> Optional[str]:
-        """Maps an instrument to a stock TestController driver name, or None when unknown.
-
-        Returning None is deliberate: a guessed name is worse than no entry, because
-        TestController aborts loading every remaining device when it meets one it
-        does not recognise.
-        """
+        """Maps an instrument to a stock TestController driver name, or None when unknown."""
         combined = f"{idn} {description} {visa_address}".upper()
 
         if "34401A" in combined:
@@ -565,9 +526,6 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         """
         Generates settingsGPIB.txt and settingsLoad.txt for TestController from the
         active VMSG mappings.
-
-        Devices whose instrument does not map to a stock TestController driver are
-        excluded rather than guessed at, and reported under "excluded_devices".
         """
         try:
             cfg = app.state.config
@@ -599,16 +557,21 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 desc = m.get("description", "")
 
                 driver = _map_to_testcontroller_driver(idn, visa_addr, desc)
-                if driver is None or driver not in valid_drivers:
-                    excluded_devices.append({
-                        "address": slot_int,
-                        "visa_address": visa_addr,
-                        "description": desc,
-                        "idn": idn,
-                        "reason": ("No matching TestController driver" if driver is None
-                                   else f"Driver '{driver}' not present in {driver_source}")
-                    })
-                    continue
+                if valid_drivers is not None:
+                    if driver is None or driver not in valid_drivers:
+                        excluded_devices.append({
+                            "address": slot_int,
+                            "visa_address": visa_addr,
+                            "description": desc,
+                            "idn": idn,
+                            "reason": ("No matching TestController driver" if driver is None
+                                       else f"Driver '{driver}' not present in {driver_source}")
+                        })
+                        continue
+                else:
+                    # Driver validation disabled: export all mapped devices cleanly
+                    if not driver:
+                        driver = desc or idn or f"Device_Slot_{slot_int}"
 
                 if separate_adapters:
                     device_ctrl_id = alphabet[ctrl_index % len(alphabet)]
