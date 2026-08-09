@@ -50,8 +50,9 @@ jobs:
           python vmsg.py &
           SERVER_PID=$!
           sleep 3
-          python test_emulator.py
-          kill $SERVER_PID || true
+          trap 'kill $SERVER_PID || true' EXIT
+          python tests/test_prologix_gateway.py
+          python tests/test_query_atomicity_and_config.py
 
       - name: Compile Standalone Binary
         run: python build_binary.py
