@@ -76,7 +76,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     app = FastAPI(
         title="VISA Mapping TCP/IP Socket Gateway (VMSG)",
         description="A premium web dashboard and API for managing the VISA Mapping TCP/IP Socket Gateway, implementing Prologix compatible control.",
-        version="1.0.0"
+        version="1.1.0"
     )
 
     # Store references in app.state

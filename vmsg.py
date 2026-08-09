@@ -58,7 +58,7 @@ async def main():
 
     # Print startup banner directly to console
     print("================================================================================")
-    print("  VISA Mapping TCP/IP Socket Gateway (VMSG) v1.0.0")
+    print("  VISA Mapping TCP/IP Socket Gateway (VMSG) v1.1.0")
     print("  Prologix Control Socket : tcp://0.0.0.0:1234")
     print("  Web Dashboard & REST API : http://localhost:8080")
     print(f"  Config File Path         : {config.filepath}")
