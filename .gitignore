@@ -31,3 +31,8 @@ Thumbs.db
 # Runtime persistent configuration
 mappings.json
 mappings.json.tmp
+
+# TestController patch tool - downloaded CFR/ECJ jars, not our code
+tools/tc-patch-tools/
+TestController-patched.jar
+TestController-scripted.jar
