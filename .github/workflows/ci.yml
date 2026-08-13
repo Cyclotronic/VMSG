@@ -1,8 +1,12 @@
 name: Continuous Integration
 
+# Runs on every branch, not just main. Without branch protection the feedback
+# has to come to you before you merge, so a feature branch that gets no CI is a
+# feature branch you end up testing on main.
 on:
   push:
-    branches: [main, master]
+    branches: ['**']
+    tags-ignore: ['**']
   pull_request:
   workflow_dispatch:
 

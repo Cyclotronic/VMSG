@@ -1,0 +1,95 @@
+#!/bin/sh
+#
+# VMSG pre-push hook: run the fast checks before anything leaves the machine.
+#
+# This project deliberately does not use branch protection, so nothing on the
+# server side stops a broken push. That makes local enforcement worth having:
+# the repository history contains a run of three consecutive red CI builds
+# followed by a fix commit, all landing directly on main, which is precisely
+# what this prevents.
+#
+# It runs the two checks that are fast and catch the most:
+#
+#   pyflakes                  undefined names and unused imports. VMSG has
+#                             function-level imports and a packaged build, so a
+#                             NameError can survive to runtime.
+#   tools/verify_offline.py   Prologix protocol fidelity against mock
+#                             instruments. No hardware, no network, ~10s, and
+#                             it uses a scratch port and temp config so it
+#                             cannot disturb a running gateway or your
+#                             mappings.json.
+#
+# Install:
+#     python tools/install_hooks.py
+#
+# Bypass for a genuine emergency (it will tell you it happened):
+#     git push --no-verify
+#
+# It intentionally does NOT run the integration suites or a binary build. A
+# pre-push hook that takes minutes gets bypassed, and a hook that is always
+# bypassed is worse than no hook.
+
+set -e
+
+# Resolve the repo root regardless of where git invoked us from.
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+PYTHON="${VMSG_HOOK_PYTHON:-python}"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    PYTHON=python3
+fi
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    echo "pre-push: no python on PATH; skipping checks." >&2
+    exit 0
+fi
+
+echo "pre-push: running local checks (git push --no-verify to skip)"
+
+fail=0
+
+printf '  [1/2] static analysis ... '
+if out="$("$PYTHON" -m pyflakes vmsg.py vmsg_core tests tools build_binary.py 2>&1)"; then
+    if [ -n "$out" ]; then
+        echo "FAIL"
+        echo "$out" | sed 's/^/        /'
+        fail=1
+    else
+        echo "ok"
+    fi
+else
+    # pyflakes exits non-zero when it reports findings, and also if absent.
+    if echo "$out" | grep -qi "No module named"; then
+        echo "skipped (pyflakes not installed: pip install -r requirements-dev.txt)"
+    else
+        echo "FAIL"
+        echo "$out" | sed 's/^/        /'
+        fail=1
+    fi
+fi
+
+printf '  [2/2] offline protocol fidelity ... '
+if out="$("$PYTHON" tools/verify_offline.py 2>&1)"; then
+    echo "ok"
+else
+    echo "FAIL"
+    echo "$out" | tail -25 | sed 's/^/        /'
+    fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    cat >&2 <<'EOF'
+
+pre-push: checks failed, push aborted.
+
+Fix the above, or if this is genuinely urgent:
+    git push --no-verify
+
+If you bypass, watch the CI run - it performs these same checks plus the
+integration suites and a verified binary build.
+EOF
+    exit 1
+fi
+
+echo "pre-push: checks passed"
+exit 0
