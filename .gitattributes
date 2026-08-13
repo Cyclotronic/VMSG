@@ -1,0 +1,41 @@
+# Line-ending and encoding policy.
+#
+# This repository lives on a file share used from both Windows and macOS, and
+# is edited by more than one person and more than one agent. Without explicit
+# rules, `core.autocrlf` differs per machine and every checkout produces
+# whole-file diffs that bury the real change.
+#
+# Rule: LF in the repository, LF in the working tree, everywhere.
+
+* text=auto eol=lf
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.spec  text eol=lf
+*.cfg   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.html  text eol=lf
+
+# ---------------------------------------------------------------------------
+# Byte-exact hardware captures. DO NOT let git touch these.
+#
+# core/prologix_help.txt is the ++help listing recorded verbatim from a
+# physical Prologix controller, CRLF terminators included, because the
+# controller terminates its own replies that way. It is served to clients
+# ---------------------------------------------------------------------------
+# TestController device definitions and exported settings files are data that
+# TestController parses. Keep them exactly as captured rather than reformatted.
+# ---------------------------------------------------------------------------
+**/Devices/** -text
+**/settings*.txt -text
+
+# Binary assets
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.dat   binary
