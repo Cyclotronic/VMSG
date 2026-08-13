@@ -429,6 +429,34 @@ class VisaManager:
         serial = parts[2] if len(parts) > 2 and parts[2] not in ("", "0") else ""
         return f"{model},{serial}" if serial else model
 
+    def check_healing_needed(self, mappings: dict = None) -> list:
+        """
+        Evaluates mappings and returns a list of integer virtual slot addresses
+        that suspect USB lottery changes or unresponsiveness.
+        """
+        needing_healing = set()
+        if mappings is None and hasattr(self, 'config') and self.config:
+            mappings = self.config.get_mappings()
+        if not mappings:
+            return []
+
+        for slot_str, m in mappings.items():
+            try:
+                slot_int = int(slot_str)
+            except ValueError:
+                continue
+            visa_addr = m.get("visa_address", "")
+            idn_pattern = m.get("idn_pattern", "")
+
+            if visa_addr in self.unresponsive_cache:
+                needing_healing.add(slot_int)
+            elif visa_addr and visa_addr.startswith("USB") and idn_pattern:
+                res = self.query_idn(visa_addr, timeout_ms=300)
+                if not res or idn_pattern not in res:
+                    needing_healing.add(slot_int)
+
+        return sorted(list(needing_healing))
+
 
 
 
