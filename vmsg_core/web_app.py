@@ -3,7 +3,7 @@ import asyncio
 import re
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Body, APIRouter
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -12,6 +12,8 @@ from .config_manager import ConfigManager
 from .visa_manager import VisaManager
 from .logger import logger
 from .path_helper import get_resource_path
+from .version import __version__
+from . import apiauth
 
 class MappingModel(BaseModel):
     visa_address: str = Field(..., description="The physical or mock VISA resource string")
@@ -39,6 +41,10 @@ class SettingsModel(BaseModel):
     tc_devices_path: Optional[str] = Field(None, description="Path to the TestController Devices folder, used to validate driver names")
     multi_port_enabled: Optional[bool] = Field(None, description="Give mapped slots their own TCP listener ports")
     multi_port_base: Optional[int] = Field(None, ge=1025, le=65000, description="First port used when auto-allocating dedicated ports")
+    preset_profile: Optional[str] = Field(None, description="Hardware preset profile (Prologix, E5810A, Keysight 34461A LXI, Siglent SDM3065X LXI, AR488)")
+    lxi_raw_socket_enabled: Optional[bool] = Field(None, description="Enable LXI SCPI Raw Socket Server (Port 5025)")
+    lxi_raw_socket_port: Optional[int] = Field(None, description="LXI SCPI Raw Socket Port (Default 5025)")
+    lxi_mdns_enabled: Optional[bool] = Field(None, description="Enable LXI mDNS Discovery Responder (UDP Port 5353)")
     log_level: Optional[str] = Field(None, description="Logging verbosity (DEBUG, INFO, WARN, ERROR)")
     enable_stdout: Optional[bool] = Field(None, description="Toggle standard output console printing")
     log_category_traffic: Optional[bool] = Field(None, description="Toggle traffic logs")
@@ -76,7 +82,7 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     app = FastAPI(
         title="VISA Mapping TCP/IP Socket Gateway (VMSG)",
         description="A premium web dashboard and API for managing the VISA Mapping TCP/IP Socket Gateway, implementing Prologix compatible control.",
-        version="1.1.0"
+        version=__version__
     )
 
     # Store references in app.state
@@ -84,17 +90,37 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     app.state.visa = visa
     app.state.socket_server = socket_server
 
-    # Allow CORS for easy debugging
+    # CORS is deliberately NOT "*". The dashboard is served from this same
+    # origin so it needs no CORS grant at all; a wildcard only widens what an
+    # unrelated site can do to a control API that reaches real instruments.
+    # Extra origins can be added for remote dashboards via VMSG_CORS_ORIGINS.
+    _default_origins = [
+        "http://localhost:8080", "http://127.0.0.1:8080",
+    ]
+    _extra = [o.strip() for o in (os.environ.get("VMSG_CORS_ORIGINS") or "").split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_default_origins + _extra,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # Token auth. Binds stay on 0.0.0.0, so this is the control that keeps the
+    # API from being open to the network - see vmsg_core/apiauth.py.
+    auth_enabled = bool(config.get_setting("api_auth_enabled", True))
+    app.state.api_token = apiauth.install(app, config, enabled=auth_enabled)
+    app.state.api_auth_enabled = auth_enabled
+
     # API Router
     api = APIRouter(prefix="/api")
+
+    # Startup Validation Check for TestController Devices Directory
+    startup_val_enabled = config.get_setting("tc_enable_driver_validation", False)
+    startup_dev_path = (config.get_setting("tc_devices_path", "") or "").strip()
+    if startup_val_enabled and (not startup_dev_path or not os.path.isdir(startup_dev_path)):
+        logger.warning("WEB_API", f"[Startup Check] TestController Devices path '{startup_dev_path}' is missing or invalid. Unsetting driver validation option.")
+        config.update_settings({"tc_enable_driver_validation": False})
 
     # 1. Status Endpoints
     @api.get("/status")
@@ -217,12 +243,25 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         try:
             # Filter None fields
             updates = {k: v for k, v in data.model_dump().items() if v is not None}
+
+            # Reject enabling driver validation if directory is missing or invalid
+            if updates.get("tc_enable_driver_validation") is True:
+                target_path = (updates.get("tc_devices_path") or app.state.config.get_setting("tc_devices_path", "") or "").strip()
+                if not target_path:
+                    raise HTTPException(status_code=400, detail="Cannot enable driver validation: TestController Devices directory path is not defined.")
+                if not os.path.exists(target_path) or not os.path.isdir(target_path):
+                    raise HTTPException(status_code=400, detail=f"Cannot enable driver validation: Directory '{target_path}' does not exist or is not a directory.")
+
             if updates:
                 app.state.config.update_settings(updates)
                 logger.info("WEB_API", f"Prologix settings updated: {updates}")
                 if "multi_port_enabled" in updates or "multi_port_base" in updates:
                     await _apply_port_bindings()
+                if "tc_enable_driver_validation" in updates or "tc_devices_path" in updates:
+                    _get_cached_tc_drivers(force_rescan=True)
             return {"status": "success", "settings": app.state.config.get_settings()}
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -289,6 +328,26 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         except Exception as e:
             logger.error("WEB_API", f"Config restore failed: {e}")
             raise HTTPException(status_code=500, detail=f"Restore failed: {e}")
+
+    @api.get("/heal/check")
+    def check_healing_candidates():
+        """Returns a list of slots that suspect USB port lottery changes or unresponsiveness."""
+        try:
+            candidates = app.state.visa.check_healing_needed()
+            return {"status": "success", "slots_needing_healing": candidates}
+        except Exception as e:
+            logger.error("WEB_API", f"Heal check failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Heal check failed: {e}")
+
+    @api.post("/heal")
+    def heal_usb_lottery():
+        """Triggers healing logic for unresponsive or shifted USB VISA mappings."""
+        try:
+            res = app.state.visa.heal_mappings()
+            return {"status": "success", "healed": res}
+        except Exception as e:
+            logger.error("WEB_API", f"USB healing failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Healing failed: {e}")
 
     # 4. VISA Hardware Discovery
     @api.get("/scan")
@@ -434,32 +493,125 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             logger.error("WEB_API", f"Auto-assignment failed: {e}")
             raise HTTPException(status_code=500, detail=f"Auto-assignment failed: {e}")
 
-    def _load_tc_driver_names() -> tuple:
-        """Valid TestController driver names, read from the user's Devices folder when
-        configured so the check tracks their actual install; returns None if driver
-        validation is disabled."""
-        if not bool(app.state.config.get_setting("tc_enable_driver_validation", False)):
-            return None, "disabled"
+    tc_driver_cache = {
+        "path": "",
+        "names": None,
+        "source": "disabled",
+        "status": "disabled",
+        "valid_dir": False,
+        "scanned": False,
+        "message": "Driver validation is disabled"
+    }
 
+    def _get_cached_tc_drivers(force_rescan: bool = False) -> tuple:
+        """
+        Validates the TestController Devices directory and returns:
+        (valid_drivers_set, driver_source_str, status_code, directory_valid_bool, status_message_str)
+        Scans on startup or explicit user request. If directory is missing/invalid,
+        expires cached data and unsets the validation option.
+        """
+        is_enabled = bool(app.state.config.get_setting("tc_enable_driver_validation", False))
         path = (app.state.config.get_setting("tc_devices_path", "") or "").strip()
-        if path and os.path.isdir(path):
-            names = set()
-            try:
-                for entry in os.listdir(path):
-                    if not entry.lower().endswith(".txt"):
-                        continue
-                    with open(os.path.join(path, entry), "r", encoding="utf-8", errors="replace") as fh:
-                        for line in fh:
-                            if line.startswith("#name"):
-                                name = line[5:].strip()
-                                if name:
-                                    names.add(name)
-            except Exception as e:
-                logger.warning("WEB_API", f"Could not read TestController Devices folder '{path}': {e}")
-                return KNOWN_TC_DRIVERS, "builtin"
-            if names:
-                return names, path
-        return KNOWN_TC_DRIVERS, "builtin"
+
+        if not is_enabled:
+            tc_driver_cache.update({
+                "path": path,
+                "names": None,
+                "source": "disabled",
+                "status": "disabled",
+                "valid_dir": False,
+                "scanned": False,
+                "message": "Driver validation is disabled (exporting all mapped devices)"
+            })
+            return None, "disabled", "disabled", False, "Driver validation is disabled (exporting all mapped devices)"
+
+        # Return cached scan if path still exists on disk
+        if not force_rescan and tc_driver_cache["scanned"] and tc_driver_cache["path"] == path and tc_driver_cache["valid_dir"]:
+            if os.path.exists(path) and os.path.isdir(path):
+                return (
+                    tc_driver_cache["names"],
+                    tc_driver_cache["source"],
+                    tc_driver_cache["status"],
+                    tc_driver_cache["valid_dir"],
+                    tc_driver_cache["message"]
+                )
+            # Directory no longer exists on disk! Expire cache & unset option
+            logger.warning("WEB_API", f"TestController Devices path '{path}' no longer exists. Unsetting driver validation option.")
+            app.state.config.update_settings({"tc_enable_driver_validation": False})
+            tc_driver_cache.update({
+                "path": path,
+                "names": None,
+                "source": "disabled",
+                "status": "directory_invalid",
+                "valid_dir": False,
+                "scanned": False,
+                "message": f"Devices path '{path}' no longer exists. Driver validation disabled."
+            })
+            return None, "disabled", "directory_invalid", False, f"Devices path '{path}' no longer exists. Driver validation disabled."
+
+        # Validate directory existence; if missing/invalid, expire cache & unset option
+        if not path or not os.path.exists(path) or not os.path.isdir(path):
+            if is_enabled:
+                logger.warning("WEB_API", f"TestController Devices path '{path}' is invalid or missing. Unsetting driver validation option.")
+                app.state.config.update_settings({"tc_enable_driver_validation": False})
+
+            tc_driver_cache.update({
+                "path": path,
+                "names": None,
+                "source": "disabled",
+                "status": "directory_invalid",
+                "valid_dir": False,
+                "scanned": False,
+                "message": f"Configured Devices path '{path}' is invalid or missing. Driver validation was disabled."
+            })
+            return None, "disabled", "directory_invalid", False, f"Devices path '{path}' is invalid or missing. Driver validation disabled."
+
+        # Perform scan on valid directory
+        names = set()
+        try:
+            for entry in os.listdir(path):
+                if not entry.lower().endswith(".txt"):
+                    continue
+                filepath = os.path.join(path, entry)
+                if not os.path.isfile(filepath):
+                    continue
+                with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if line.startswith("#name"):
+                            name = line[5:].strip()
+                            if name:
+                                names.add(name)
+        except Exception as e:
+            logger.warning("WEB_API", f"Could not scan TestController Devices folder '{path}': {e}")
+
+        if names:
+            tc_driver_cache.update({
+                "path": path,
+                "names": names,
+                "source": f"directory ({len(names)} drivers)",
+                "status": "active",
+                "valid_dir": True,
+                "scanned": True,
+                "message": f"Validation active: {len(names)} driver(s) loaded from '{path}'"
+            })
+        else:
+            tc_driver_cache.update({
+                "path": path,
+                "names": KNOWN_TC_DRIVERS,
+                "source": "builtin",
+                "status": "no_drivers_found",
+                "valid_dir": True,
+                "scanned": True,
+                "message": f"No valid .txt driver files with '#name' found in '{path}'. Using built-in driver set."
+            })
+
+        return (
+            tc_driver_cache["names"],
+            tc_driver_cache["source"],
+            tc_driver_cache["status"],
+            tc_driver_cache["valid_dir"],
+            tc_driver_cache["message"]
+        )
 
     def _map_to_testcontroller_driver(idn: str, visa_address: str, description: str) -> Optional[str]:
         """Maps an instrument to a stock TestController driver name, or None when unknown."""
@@ -534,7 +686,8 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
             ctrl_id_base = controller_id.strip().upper() if controller_id.strip() else "A"
             gw_host = host.strip() if host.strip() else "127.0.0.1"
 
-            valid_drivers, driver_source = _load_tc_driver_names()
+            valid_drivers, driver_source, val_status, dir_valid, val_msg = _get_cached_tc_drivers()
+            settings = cfg.get_settings()
             force_addr = bool(settings.get("tc_force_addr", True))
             if use_ports is None:
                 use_ports = bool(settings.get("multi_port_enabled", False))
@@ -556,7 +709,28 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 idn = m.get("idn_pattern", "")
                 desc = m.get("description", "")
 
+                # 1. Try static mapping rule
                 driver = _map_to_testcontroller_driver(idn, visa_addr, desc)
+
+                # 2. Dynamic match against valid_drivers set if static rule returned None
+                if not driver and valid_drivers:
+                    valid_map = {d.upper(): d for d in valid_drivers}
+                    if desc and desc.strip().upper() in valid_map:
+                        driver = valid_map[desc.strip().upper()]
+                    elif idn and idn.strip().upper() in valid_map:
+                        driver = valid_map[idn.strip().upper()]
+                    else:
+                        combined_text = f"{desc} {idn} {visa_addr}".upper()
+                        for d_upper, d_orig in valid_map.items():
+                            if d_upper in combined_text:
+                                driver = d_orig
+                                break
+
+                # 3. If validation disabled, fallback to desc or idn
+                if valid_drivers is None and not driver:
+                    driver = desc.strip() or idn.strip() or f"Device_Slot_{slot_int}"
+
+                # 4. Handle validation failure
                 if valid_drivers is not None:
                     if driver is None or driver not in valid_drivers:
                         excluded_devices.append({
@@ -568,10 +742,6 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                                        else f"Driver '{driver}' not present in {driver_source}")
                         })
                         continue
-                else:
-                    # Driver validation disabled: export all mapped devices cleanly
-                    if not driver:
-                        driver = desc or idn or f"Device_Slot_{slot_int}"
 
                 if separate_adapters:
                     device_ctrl_id = alphabet[ctrl_index % len(alphabet)]
@@ -621,6 +791,12 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
                 "force_addr": force_addr,
                 "use_ports": use_ports,
                 "driver_source": driver_source,
+                "driver_validation_enabled": bool(settings.get("tc_enable_driver_validation", False)),
+                "driver_directory": settings.get("tc_devices_path", ""),
+                "driver_directory_valid": dir_valid,
+                "driver_validation_status": val_status,
+                "driver_status_msg": val_msg,
+                "driver_count": len(valid_drivers) if valid_drivers else 0,
                 "scan_serial_ports": scan_serial == "1",
                 "excluded_serial_ports": excluded,
                 "settingsGPIB": gpib_text,
@@ -631,6 +807,19 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
         except Exception as e:
             logger.error("WEB_API", f"TestController config generation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+    @api.post("/testcontroller/rescan_drivers")
+    def rescan_testcontroller_drivers():
+        """Forces an immediate re-scan and validation of the TestController Devices directory."""
+        names, source, val_status, dir_valid, msg = _get_cached_tc_drivers(force_rescan=True)
+        return {
+            "status": "success",
+            "driver_source": source,
+            "validation_status": val_status,
+            "directory_valid": dir_valid,
+            "message": msg,
+            "driver_count": len(names) if names else 0
+        }
 
     # 4c. Host serial port discovery (for the TestController exclusion list)
     @api.get("/host/serial_ports")
@@ -854,7 +1043,22 @@ def create_app(config: ConfigManager, visa: VisaManager, socket_server=None) -> 
     def serve_dashboard():
         index_path = os.path.join(static_dir, "index.html")
         if os.path.exists(index_path):
-            return FileResponse(index_path)
+            # Inject the API token into the page. Same-origin policy keeps it
+            # unreadable to other sites, so the dashboard authenticates without
+            # a login step while cross-site requests still fail.
+            try:
+                with open(index_path, encoding="utf-8") as fh:
+                    html = fh.read()
+                inject = (f'<script>window.VMSG_API_TOKEN = '
+                          f'"{app.state.api_token}";</script>')
+                if "</head>" in html:
+                    html = html.replace("</head>", inject + "\n</head>", 1)
+                else:
+                    html = inject + "\n" + html
+                return HTMLResponse(html)
+            except OSError as e:
+                logger.error("WEB_API", f"Could not read dashboard: {e}")
+                return FileResponse(index_path)
         else:
             return {
                 "error": "static/index.html is missing. Setup static folder.",

@@ -7,7 +7,11 @@ from typing import Dict, Any, Optional
 from .logger import logger
 from .path_helper import get_writable_config_path
 
-DEFAULT_MAPPINGS_FILE = get_writable_config_path()
+# VMSG_CONFIG_FILE lets a packaged build, a container, or a test run point at an
+# isolated config instead of the user's real one. Without it, verifying a build
+# would mean writing to the live bench configuration.
+DEFAULT_MAPPINGS_FILE = (os.environ.get("VMSG_CONFIG_FILE") or "").strip() \
+    or get_writable_config_path()
 
 DEFAULT_CONFIG = {
     "settings": {
@@ -21,6 +25,10 @@ DEFAULT_CONFIG = {
         "eot_char": 4,
         "lon": 0,
         "savecfg": 1,
+        # Control-API authentication. The token is generated on first run and
+        # persisted here so it survives restarts; VMSG_API_TOKEN overrides it.
+        "api_auth_enabled": True,
+        "api_token": "",
         "unmapped_behavior": "message",
         "scan_serial_ports": False,
         # TestController export controls
@@ -32,6 +40,11 @@ DEFAULT_CONFIG = {
         # Dedicated per-device listener ports (single-port mode is the default)
         "multi_port_enabled": False,
         "multi_port_base": 1235,
+        # Hardware Preset Profile & LXI Server Controls
+        "preset_profile": "Prologix Ethernet (Official v01.06.06.00)",
+        "lxi_raw_socket_enabled": True,
+        "lxi_raw_socket_port": 5025,
+        "lxi_mdns_enabled": True,
         # Default logging controller settings
         "log_level": "WARN",
         "enable_stdout": False,

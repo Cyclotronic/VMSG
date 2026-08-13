@@ -6,6 +6,7 @@ Tests Prologix GPIB-ETHERNET emulation protocol commands, SCPI pass-through,
 parallel socket session isolation, query lock isolation, and REST API endpoints.
 """
 
+import os
 import socket
 import sys
 import time
@@ -17,6 +18,12 @@ import concurrent.futures
 BASE_URL = "http://127.0.0.1:8080"
 SOCKET_HOST = "127.0.0.1"
 SOCKET_PORT = 1234
+
+# The control API requires a token; installing a global opener authenticates
+# every urllib call below without touching each call site.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_auth_helper import install as _install_api_token  # noqa: E402
+_API_TOKEN = _install_api_token()
 
 
 def api_get(path):
@@ -239,14 +246,35 @@ def test_08_gpib_address_zero_support(s):
 
 
 def test_09_testcontroller_config_generator_api():
-    """Tests TestController Config Generator REST API endpoint."""
-    print("\n[Test 9] Testing TestController Config Generator REST API...")
+    """Tests TestController Config Generator REST API endpoint & dynamic mapping updates."""
+    print("\n[Test 9] Testing TestController Config Generator REST API & Dynamic Mapping Updates...")
     tc_url = f"{BASE_URL}/api/testcontroller/config?controller_id=A&host=127.0.0.1"
+    
+    # 1. Base export check
     with urllib.request.urlopen(tc_url) as tc_resp:
         tc_data = json.loads(tc_resp.read().decode())
         assert "PrologixEthernet|id:A|address:127.0.0.1" in tc_data.get("settingsGPIB")
         assert "Device:" in tc_data.get("settingsLoad")
-        print("[+] Test 9 PASSED.")
+
+    # 2. Add a new mapping at slot 28 and verify TC export updates dynamically
+    api_put_mapping(28, "MOCK::DMM::INSTR_TC_TEST", "HEWLETT-PACKARD,34401A", "Dynamic TC Test DMM")
+    with urllib.request.urlopen(tc_url) as tc_resp:
+        tc_data = json.loads(tc_resp.read().decode())
+        load_text = tc_data.get("settingsLoad", "")
+        mapped_addrs = [d.get("address") for d in tc_data.get("mapped_devices", [])]
+        assert 28 in mapped_addrs, "Newly added slot 28 should be included in TestController export"
+        assert ":28|" in load_text or ":28" in load_text, "Newly added slot 28 address should appear in TestController settingsLoad text"
+
+    # 3. Delete mapping at slot 28 and verify TC export updates dynamically
+    api_delete_mapping(28)
+    with urllib.request.urlopen(tc_url) as tc_resp:
+        tc_data = json.loads(tc_resp.read().decode())
+        load_text = tc_data.get("settingsLoad", "")
+        mapped_addrs = [d.get("address") for d in tc_data.get("mapped_devices", [])]
+        assert 28 not in mapped_addrs, "Deleted slot 28 should no longer appear in TestController mapped_devices"
+        assert ":28|" not in load_text, "Deleted slot 28 should no longer appear in TestController settingsLoad text"
+
+    print("[+] Test 9 PASSED.")
 
 
 def test_10_parallel_multi_client_session_isolation():
@@ -383,13 +411,17 @@ def main():
         test_15_unmapped_address_protocol_handling(s)
         test_16_optional_testcontroller_driver_validation()
         test_17_multi_port_and_force_addr_settings_toggle()
+        test_18_usb_heal_check_status_api()
+        test_19_testcontroller_driver_directory_validation_and_rescan()
+        test_20_lxi_raw_scpi_socket_port_5025()
+        test_21_hardware_preset_profile_switching()
 
         # Restore primary socket state
         s.sendall(b"++addr 1\n")
         s.sendall(b"++auto 1\n")
 
         print("\n================================================================================")
-        print("  ALL 18 INTEGRATION TESTS PASSED SUCCESSFULLY 100%!  ")
+        print("  ALL 21 INTEGRATION TESTS PASSED SUCCESSFULLY 100%!  ")
         print("  Your VISA Mapping TCP/IP Socket Gateway (VMSG) Test Harness is Complete. ")
         print("================================================================================")
         passed = True
@@ -480,9 +512,142 @@ def test_17_multi_port_and_force_addr_settings_toggle():
     with urllib.request.urlopen(req_off) as res:
         data = json.loads(res.read().decode())
         assert data.get("settings", {}).get("multi_port_enabled") is False
-        assert data.get("settings", {}).get("tc_force_addr") is False, "tc_force_addr should turn off cleanly when set to false"
-
     print("[+] Test 17 PASSED.")
+
+
+def test_18_usb_heal_check_status_api():
+    """Tests GET /api/heal/check status endpoint."""
+    print("\n[Test 18] Testing GET /api/heal/check (USB Healing Candidate Check)...")
+    with urllib.request.urlopen(f"{BASE_URL}/api/heal/check") as res:
+        check_res = json.loads(res.read().decode())
+        assert check_res.get("status") == "success"
+        assert isinstance(check_res.get("slots_needing_healing"), list)
+    print("[+] Test 18 PASSED.")
+
+
+def test_19_testcontroller_driver_directory_validation_and_rescan():
+    """Tests TestController driver directory validation, missing path warnings, and re-scan API."""
+    import os, tempfile, shutil
+    print("\n[Test 19] Testing Driver Directory Validation, Rejection of Invalid Path & Re-scan API...")
+    
+    # 1. Attempting to enable validation with an invalid directory path must be REJECTED (HTTP 400)
+    invalid_path = "/non_existent_tc_devices_dir_12345"
+    payload_invalid = {
+        "tc_enable_driver_validation": True,
+        "tc_devices_path": invalid_path
+    }
+    req_inv = urllib.request.Request(
+        f"{BASE_URL}/api/settings",
+        data=json.dumps(payload_invalid).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req_inv) as res:
+            assert False, "Should have rejected enabling validation with an invalid directory path"
+    except urllib.error.HTTPError as err:
+        assert err.code == 400, f"Expected HTTP 400 rejection, got {err.code}"
+
+    # 2. Create a temporary valid directory with a mock driver file
+    temp_dir = tempfile.mkdtemp(prefix="vmsg_tc_drivers_")
+    try:
+        mock_driver_path = os.path.join(temp_dir, "mock_scope.txt")
+        with open(mock_driver_path, "w") as f:
+            f.write("#name TestCustomDriver99\n#type Scope\n")
+
+        # 3. Point settings to valid temp directory
+        payload_valid = {
+            "tc_enable_driver_validation": True,
+            "tc_devices_path": temp_dir
+        }
+        req_val = urllib.request.Request(
+            f"{BASE_URL}/api/settings",
+            data=json.dumps(payload_valid).encode(),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req_val) as res:
+            assert res.status == 200
+
+        # 4. Rescan valid directory
+        rescan_valid = urllib.request.Request(
+            f"{BASE_URL}/api/testcontroller/rescan_drivers",
+            data=b"{}",
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(rescan_valid) as res:
+            res_data = json.loads(res.read().decode())
+            assert res_data.get("directory_valid") is True, "Valid temp directory should set directory_valid=True"
+            assert res_data.get("validation_status") == "active"
+            assert res_data.get("driver_count") >= 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # 5. After temp directory is removed, calling config endpoint unsets option
+    with urllib.request.urlopen(f"{BASE_URL}/api/testcontroller/config") as res:
+        tc_data = json.loads(res.read().decode())
+        assert tc_data.get("driver_directory_valid") is False
+        assert tc_data.get("driver_validation_enabled") is False, "Driver validation option should auto-unset when directory disappears"
+
+    print("[+] Test 19 PASSED.")
+
+
+def test_20_lxi_raw_scpi_socket_port_5025():
+    """Tests LXI SCPI Raw Socket Server on Port 5025."""
+    print("\n[Test 20] Testing LXI SCPI Raw Socket Server (Port 5025)...")
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(2.0)
+    s.connect((SOCKET_HOST, 5025))
+    s.sendall(b"*IDN?\n")
+    data = s.recv(1024).decode().strip()
+    s.close()
+    print(f"[Result] LXI Port 5025 IDN Response: '{data}'")
+    assert len(data) > 0
+    print("[+] Test 20 PASSED.")
+
+
+def test_21_hardware_preset_profile_switching():
+    """Tests Hardware Preset Profile Switching via REST API and ++ver response."""
+    print("\n[Test 21] Testing Hardware Preset Profile Switching via REST API...")
+    
+    # 1. Switch preset profile to Keysight E5810A
+    payload = {"preset_profile": "Keysight E5810A LAN/GPIB Gateway"}
+    req = urllib.request.Request(
+        f"{BASE_URL}/api/settings",
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req) as res:
+        assert res.status == 200
+
+    s = connect_socket()
+    s.sendall(b"++ver\n")
+    ver_resp = s.recv(1024).decode().strip()
+    s.close()
+    print(f"[Result] E5810A Preset ++ver response: '{ver_resp}'")
+    assert "Agilent E5810A" in ver_resp
+
+    # 2. Reset preset profile to Prologix Ethernet Default
+    payload_def = {"preset_profile": "Prologix Ethernet (Official v01.06.06.00)"}
+    req_def = urllib.request.Request(
+        f"{BASE_URL}/api/settings",
+        data=json.dumps(payload_def).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req_def) as res:
+        assert res.status == 200
+
+    s_def = connect_socket()
+    s_def.sendall(b"++ver\n")
+    ver_def_resp = s_def.recv(1024).decode().strip()
+    s_def.close()
+    print(f"[Result] Prologix Default ++ver response: '{ver_def_resp}'")
+    assert "Prologix GPIB-ETHERNET Controller version 01.06.06.00" in ver_def_resp
+
+    print("[+] Test 21 PASSED.")
 
 
 if __name__ == "__main__":

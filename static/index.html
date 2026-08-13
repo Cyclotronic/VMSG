@@ -470,6 +470,7 @@
 
             <!-- First-Time Welcome Note Banner -->
             <div id="welcome-banner" class="bg-indigo-50/90 dark:bg-slate-900/90 border border-indigo-200/80 dark:border-cyber-indigo/40 rounded-2xl p-5 shadow-lg flex items-start justify-between relative overflow-hidden transition-colors">
+                <script>if (localStorage.getItem('vmsg_welcome_dismissed') === 'true') { document.getElementById('welcome-banner').style.display = 'none'; }</script>
                 <div class="flex items-start space-x-3.5">
                     <div class="p-2.5 bg-indigo-500/10 dark:bg-cyber-indigo/20 border border-indigo-300/50 dark:border-cyber-indigo/30 rounded-xl text-indigo-600 dark:text-cyber-indigo shrink-0 mt-0.5 shadow-sm">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -493,7 +494,7 @@
                         </div>
                     </div>
                 </div>
-                <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1.5 hover:bg-slate-200/60 dark:hover:bg-white/10 rounded-lg transition shrink-0 ml-3" title="Dismiss">✕</button>
+                <button onclick="dismissWelcomeBanner()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1.5 hover:bg-slate-200/60 dark:hover:bg-white/10 rounded-lg transition shrink-0 ml-3" title="Dismiss">✕</button>
             </div>
 
             <!-- Prologix Controller Active Configurations Dashboard -->
@@ -866,6 +867,18 @@
                     <p class="text-slate-500 dark:text-slate-400 font-mono text-[11px]">
                         • <strong>File Destination Directory</strong>: Downloaded <code>settingsGPIB.txt</code> and <code>settingsLoad.txt</code> files should be placed directly into TestController's <code>Settings</code> directory (typically located at <code>Documents\TestController\Settings</code> or <code>TestController\Settings</code>).
                     </p>
+                <!-- Driver Validation Directory Status Banner -->
+                <div id="tc-driver-status-banner" class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-cyber-border rounded-xl p-3 flex items-center justify-between text-xs transition shadow-sm">
+                    <div class="flex items-center space-x-2.5 overflow-hidden">
+                        <span id="tc-driver-status-dot" class="h-2.5 w-2.5 rounded-full bg-slate-400 shrink-0"></span>
+                        <div class="truncate">
+                            <span id="tc-driver-status-msg" class="font-bold text-slate-800 dark:text-slate-200 block truncate">Checking Driver Directory...</span>
+                            <p id="tc-driver-status-sub" class="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate pt-0.5"></p>
+                        </div>
+                    </div>
+                    <button id="btn-rescan-tc-drivers" onclick="rescanTcDrivers()" class="px-2.5 py-1 bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-cyber-teal border border-teal-300/50 dark:border-cyber-teal/30 rounded-lg text-[11px] font-mono font-bold transition flex items-center space-x-1 shrink-0 ml-2">
+                        <span>🔄 Re-scan Directory</span>
+                    </button>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -917,6 +930,30 @@
 
     <!-- MAIN APP JAVASCRIPT -->
     <script>
+        // --- API authentication -------------------------------------------
+        // The server injects window.VMSG_API_TOKEN into this page. Wrapping
+        // fetch once attaches it to every same-origin /api/ call, so the 26
+        // existing call sites need no changes and none can be forgotten.
+        // Another origin cannot read this token, so cross-site requests to the
+        // control API still fail.
+        (function () {
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                init = init || {};
+                let url = (typeof input === 'string') ? input : (input && input.url) || '';
+                const isApi = url.startsWith('/api') ||
+                              url.startsWith(window.location.origin + '/api');
+                if (isApi && window.VMSG_API_TOKEN) {
+                    const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined) || {});
+                    if (!headers.has('X-VMSG-Token')) {
+                        headers.set('X-VMSG-Token', window.VMSG_API_TOKEN);
+                    }
+                    init = Object.assign({}, init, { headers: headers });
+                }
+                return nativeFetch(input, init);
+            };
+        })();
+
         // Theme initialization and toggle logic
         document.addEventListener('DOMContentLoaded', () => {
             const btnThemeToggle = document.getElementById('btn-theme-toggle');
@@ -1055,6 +1092,17 @@
 
             document.getElementById('modal-description').value = desc;
             document.getElementById('modal-idn-pattern').value = idnPattern;
+        }
+
+        // Welcome banner dismissal persistence
+        function dismissWelcomeBanner() {
+            try {
+                localStorage.setItem('vmsg_welcome_dismissed', 'true');
+            } catch (e) {
+                console.warn('Could not save welcome banner state to localStorage', e);
+            }
+            const banner = document.getElementById('welcome-banner');
+            if (banner) banner.remove();
         }
 
         // Main app state
@@ -1224,6 +1272,12 @@
 
                 renderPatchPanel();
                 updateConsoleTarget();
+
+                // Keep TestController modal export text updated in real-time when open
+                const tcModalEl = document.getElementById('modal-testcontroller');
+                if (tcModalEl && !tcModalEl.classList.contains('hidden') && typeof fetchTestControllerConfig === 'function') {
+                    fetchTestControllerConfig();
+                }
             } catch (err) {
                 console.error("Error syncing status: ", err);
             }
@@ -1842,8 +1896,40 @@
                 const data = await res.json();
                 document.getElementById('tc-gpib-text').value = data.settingsGPIB || '';
                 document.getElementById('tc-load-text').value = data.settingsLoad || '';
+
+                // Update Driver Directory Validation Status Callout
+                const dot = document.getElementById('tc-driver-status-dot');
+                const msg = document.getElementById('tc-driver-status-msg');
+                const sub = document.getElementById('tc-driver-status-sub');
+                
+                if (data.driver_validation_enabled) {
+                    if (data.driver_directory_valid) {
+                        if (dot) dot.className = "h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50 shrink-0";
+                        if (msg) msg.textContent = `Driver Validation Active (${data.driver_count} drivers loaded)`;
+                    } else {
+                        if (dot) dot.className = "h-2.5 w-2.5 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50 animate-pulse shrink-0";
+                        if (msg) msg.textContent = "Driver Directory Warning";
+                    }
+                    if (sub) sub.textContent = data.driver_status_msg || data.driver_directory || '';
+                } else {
+                    if (dot) dot.className = "h-2.5 w-2.5 rounded-full bg-slate-400 shrink-0";
+                    if (msg) msg.textContent = "Driver Validation Disabled";
+                    if (sub) sub.textContent = "All mapped devices exported cleanly without driver filtering.";
+                }
             } catch (err) {
                 console.error("TestController Config generation error:", err);
+            }
+        }
+
+        async function rescanTcDrivers() {
+            try {
+                const btn = document.getElementById('btn-rescan-tc-drivers');
+                if (btn) btn.innerText = "⏳ Scanning...";
+                await fetch('/api/testcontroller/rescan_drivers', { method: 'POST' });
+                await fetchTestControllerConfig();
+                if (btn) btn.innerText = "🔄 Re-scan Directory";
+            } catch (err) {
+                console.error("Rescan error:", err);
             }
         }
 

@@ -8,6 +8,7 @@ Tests:
 2. Config Atomic Writes: Verifies rapid config updates and thread-safe persistence.
 """
 
+import os
 import socket
 import sys
 import time
@@ -18,6 +19,11 @@ import urllib.request
 BASE_URL = "http://127.0.0.1:8080"
 SOCKET_HOST = "127.0.0.1"
 SOCKET_PORT = 1234
+
+# The control API requires a token; see tests/api_auth_helper.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_auth_helper import install as _install_api_token  # noqa: E402
+_API_TOKEN = _install_api_token()
 
 
 def api_put_mapping(addr, visa_addr, idn_pat, desc):
