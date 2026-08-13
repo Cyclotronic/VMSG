@@ -33,6 +33,46 @@ Pre-compiled, zero-dependency standalone binaries are available for official rel
 * **Windows**: Download `vmsg-windows-amd64.exe` and run.
 * **Linux**: Download `vmsg-linux-amd64`, add execute permission (`chmod +x vmsg-linux-amd64`), and run (`./vmsg-linux-amd64`).
 
+### Verifying a download
+
+Binaries are **not code-signed**, so Windows SmartScreen will warn on first run.
+Each asset ships a `.sha256` checksum and a `.build-info.json` recording the
+version, platform, and exact dependency versions it was built from:
+
+```bash
+sha256sum -c vmsg-linux-amd64.sha256
+```
+```powershell
+Get-FileHash vmsg-windows-amd64.exe -Algorithm SHA256
+```
+
+See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) for the full release
+provenance.
+
+### Building it yourself
+
+```bash
+pip install -r requirements-release.txt
+python build_binary.py
+```
+
+This runs static analysis and the offline protocol suite, builds from the
+tracked `vmsg.spec`, writes `dist/build-info.json` plus a checksum, then
+launches the packaged executable and verifies it behaves like the source tree.
+It refuses to report success if any stage fails. `--skip-checks` and
+`--no-verify` exist for throwaway builds and are labelled as not shippable.
+
+### Runtime configuration
+
+| Variable | Purpose |
+| :--- | :--- |
+| `VMSG_CONFIG_FILE` | Use a specific config instead of the default location |
+| `VMSG_BIND_HOST` | Bind address for all listeners (default `0.0.0.0`) |
+| `VMSG_SOCKET_PORT` | Prologix control socket (default `1234`) |
+| `VMSG_HTTP_PORT` | Dashboard and REST API (default `8080`) |
+| `VMSG_API_TOKEN` | Override the control-API token |
+| `VMSG_CORS_ORIGINS` | Extra allowed origins, comma-separated |
+
 ---
 
 ## 🛠️ Host System Prerequisites & Driver Setup

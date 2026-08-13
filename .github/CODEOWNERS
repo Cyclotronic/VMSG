@@ -1,0 +1,14 @@
+# Build, release, security-policy, and dependency changes require owner review.
+/.github/ @Cyclotronic
+/vmsg.spec @Cyclotronic
+/build_binary.py @Cyclotronic
+/SECURITY.md @Cyclotronic
+/PRIVACY.md @Cyclotronic
+/LICENSE @Cyclotronic
+
+# Authentication and socket-binding are the two places a mistake is quiet and
+# expensive, so they get the same treatment.
+/vmsg_core/apiauth.py @Cyclotronic
+/vmsg_core/netutil.py @Cyclotronic
+
+* @Cyclotronic

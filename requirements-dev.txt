@@ -1,0 +1,11 @@
+# Development and CI dependencies.
+# Runtime dependencies live in requirements.txt.
+
+# Static analysis gate used by .github/workflows/ci.yml
+pyflakes>=3.0.0
+
+# Standalone binary builds (build_binary.py)
+pyinstaller>=6.0.0
+
+# HTTP client used by the integration tests and tools
+requests>=2.31.0
