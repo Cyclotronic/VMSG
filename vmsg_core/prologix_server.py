@@ -5,6 +5,8 @@ from typing import Dict, Any, Optional
 from .config_manager import ConfigManager
 from .visa_manager import VisaManager
 from .logger import logger
+from .netutil import (DEFAULT_MAX_CLIENT_HANDLERS, MAX_PENDING_TEXT_CHARS,
+                      ClientLimiter, describe_bind_error, start_exclusive_server)
 
 from pyvisa.constants import RENLineOperation
 
@@ -22,11 +24,15 @@ class ResourceLease:
 
 class PrologixSocketServer:
     """Asynchronous TCP Socket Server running on Port 1234 that implements the VISA Mapping TCP/IP Socket Gateway (VMSG) with Prologix Ethernet compatible control."""
-    def __init__(self, host: str, port: int, config_manager: ConfigManager, visa_manager: VisaManager):
+    def __init__(self, host: str, port: int, config_manager: ConfigManager, visa_manager: VisaManager,
+                 max_clients: int = DEFAULT_MAX_CLIENT_HANDLERS):
         self.host = host
         self.port = port
         self.config = config_manager
         self.visa_manager = visa_manager
+        # Bounded acceptance: the listener is unauthenticated, so an unbounded
+        # accept loop is a trivial resource-exhaustion path.
+        self.client_limiter = ClientLimiter(max_clients)
         self.server: Optional[asyncio.Server] = None
         self.extra_servers: Dict[int, asyncio.Server] = {}
         self.port_slot_map: Dict[int, int] = {}
@@ -121,13 +127,19 @@ class PrologixSocketServer:
     async def start(self) -> None:
         """Starts the TCP socket server."""
         self.is_running = True
-        self.server = await asyncio.start_server(
-            self.handle_client, self.host, self.port,
-            reuse_address=True
-        )
+        # Exclusive bind: on Windows, reuse_address would let a second VMSG
+        # instance bind this same port and silently split client traffic.
+        try:
+            self.server = await start_exclusive_server(
+                self.handle_client, self.host, self.port
+            )
+        except OSError as e:
+            logger.error("SOCKET_SERVER", describe_bind_error(self.host, self.port, e))
+            self.is_running = False
+            raise
         sock = self.server.sockets[0]
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        
+
         logger.info("SOCKET_SERVER", f"VMSG TCP Socket Server started on {self.host}:{self.port} (Prologix compatible)")
 
         await self.sync_port_listeners()
@@ -164,14 +176,14 @@ class PrologixSocketServer:
             if port in self.extra_servers:
                 continue
             try:
-                srv = await asyncio.start_server(self.handle_client, self.host, port, reuse_address=True)
+                srv = await start_exclusive_server(self.handle_client, self.host, port)
                 self.extra_servers[port] = srv
                 self.port_slot_map[port] = slot
                 opened.append(port)
                 logger.info("SOCKET_SERVER", f"Dedicated listener started on {self.host}:{port} -> slot {slot}")
             except OSError as e:
-                failed[port] = str(e)
-                logger.error("SOCKET_SERVER", f"Could not bind dedicated port {port} for slot {slot}: {e}")
+                failed[port] = describe_bind_error(self.host, port, e)
+                logger.error("SOCKET_SERVER", f"Slot {slot}: {failed[port]}")
 
         return {"opened": opened, "closed": closed, "failed": failed,
                 "active": dict(self.port_slot_map)}
@@ -218,6 +230,19 @@ class PrologixSocketServer:
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Handles a client TCP connection with isolated per-client session state."""
         client_address = writer.get_extra_info('peername')
+
+        if not self.client_limiter.admit(writer):
+            logger.warning(
+                "SOCKET_SERVER",
+                f"Refusing {client_address}: client limit of "
+                f"{self.client_limiter.limit} reached.")
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
         logger.info("SOCKET_SERVER", f"New client connection established from {client_address}")
         self.active_connections.add(client_address)
         session = self.config.get_settings().copy()
@@ -250,10 +275,17 @@ class PrologixSocketServer:
                     break
 
                 buffer += data.decode('utf-8', errors='replace')
-                if len(buffer) > 65536:
-                    logger.warning("SOCKET_SERVER", f"Client {client_address} buffer limit exceeded (64KB). Truncating buffer...")
-                    buffer = buffer[-4096:]
-                
+                if len(buffer) > MAX_PENDING_TEXT_CHARS:
+                    # Truncating mid-stream does not recover, it desynchronises:
+                    # the next line parsed is the tail of a command. Close and
+                    # say why, so the client sees a clean failure.
+                    logger.warning(
+                        "SOCKET_SERVER",
+                        f"Client {client_address} exceeded {MAX_PENDING_TEXT_CHARS} "
+                        f"bytes with no line terminator; closing connection.")
+                    break
+
+
                 # Split commands on CR, LF, or CR+LF
                 lines = re.split(r'\r\n|\n|\r', buffer)
                 # Keep remaining incomplete line in buffer
@@ -281,6 +313,7 @@ class PrologixSocketServer:
                 await writer.wait_closed()
             except Exception:
                 pass
+            self.client_limiter.release(writer)
             self.active_connections.discard(client_address)
             self.client_sessions.pop(client_address, None)
             await self.release_session_leases(client_address)
@@ -350,7 +383,12 @@ class PrologixSocketServer:
 
         # 4. ++ver (Version query)
         elif cmd == "ver":
-            return "Prologix GPIB-ETHERNET Controller version 6.1.0.0\r\n"
+            preset = self.config.get_setting("preset_profile", "Prologix Ethernet (Official v01.06.06.00)")
+            if "E5810" in preset:
+                return "Agilent E5810A LAN/GPIB Gateway v01.00.00\r\n"
+            elif "AR488" in preset:
+                return "AR488 GPIB-ETHERNET Controller v0.49.2\r\n"
+            return "Prologix GPIB-ETHERNET Controller version 01.06.06.00\r\n"
 
         # 5. ++eos (Termination format)
         elif cmd == "eos":
@@ -548,10 +586,10 @@ class PrologixSocketServer:
             )
             return help_text
 
-        # Unknown commands: silently log without injecting error strings into client data stream
+        # Unknown commands: return Unrecognized command\r\n matching physical Prologix hardware
         else:
             logger.warning("SOCKET_SERVER", f"Received unknown command: ++{cmd}")
-            return None
+            return "Unrecognized command\r\n"
 
     async def route_instrument_cmd(self, command: str, client_addr: tuple) -> Optional[str]:
         """Routes regular instrument command to physical/mock instrument atomically."""
