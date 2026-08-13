@@ -1,0 +1,34 @@
+# Exact environment for building official VMSG artifacts.
+#
+# requirements.txt stays deliberately flexible for development. Release builds
+# pin instead, so that a published binary can be traced to a known-good set of
+# versions and rebuilt identically later. A packaging toolchain that drifts
+# between releases turns "it worked last time" into an unanswerable question.
+#
+# Update these deliberately, in their own commit, and re-run:
+#     python build_binary.py
+#     python tools/verify_frozen_build.py
+#
+# Captured 2026-08-12 from a verified Windows build (Python 3.11 target).
+
+# --- runtime ---
+fastapi==0.141.1
+starlette==1.6.0
+pydantic==2.13.4
+uvicorn==0.52.1
+pyvisa==1.16.2
+pyvisa-py==0.8.1
+pyserial==3.5
+pyusb==1.3.1
+
+# --- packaging toolchain ---
+pyinstaller==6.22.0
+pyinstaller-hooks-contrib==2026.6
+altgraph==0.17.5
+packaging==26.3
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
+setuptools==84.0.0
+
+# --- pre-flight checks run by build_binary.py ---
+pyflakes==3.4.0

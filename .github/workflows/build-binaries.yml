@@ -1,21 +1,30 @@
-name: Build and Release VMSG Binaries
+name: Build Binaries
+
+# Builds and *verifies* the packaged artifacts on every push, PR and tag.
+# Publishing is deliberately a separate workflow (publish-release.yml) that runs
+# only for tags: a build that cannot be verified must never reach a release page,
+# and keeping the two apart makes that impossible to get wrong by accident.
 
 on:
   push:
-    branches: [ main, master ]
-    tags:
-      - 'v*'
+    branches: [main, master]
+    tags: ['v*']
   pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
+# Read-only. This workflow produces artifacts; it never writes to the repository.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build and verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -30,63 +39,50 @@ jobs:
             executable: dist/vmsg
 
     steps:
-      - name: Checkout Source Code
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
 
-      - name: Install Dependencies
+      # Pinned toolchain, so a published artifact traces to reviewed versions
+      # rather than to whatever resolved on the day.
+      - name: Install pinned release dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          python -m pip install -r requirements-release.txt
 
-      - name: Run Integration Tests
-        shell: bash
-        run: |
-          python vmsg.py &
-          SERVER_PID=$!
-          sleep 3
-          trap 'kill $SERVER_PID || true' EXIT
-          python tests/test_prologix_gateway.py
-          python tests/test_query_atomicity_and_config.py
-
-      - name: Compile Standalone Binary
+      # Runs pre-flight checks (pyflakes + offline fidelity), builds from the
+      # tracked vmsg.spec, writes provenance, then verifies the frozen bundle.
+      # Any failure fails the job, so an unverified artifact is never uploaded.
+      - name: Build and verify binary
         run: python build_binary.py
 
-      - name: Prepare Binary Asset
+      - name: Stage artifacts
         shell: bash
         run: |
           mkdir -p bin_out
-          cp ${{ matrix.executable }} bin_out/${{ matrix.asset_name }}
+          cp "${{ matrix.executable }}" "bin_out/${{ matrix.asset_name }}"
+          cp dist/build-info.json "bin_out/${{ matrix.asset_name }}.build-info.json"
+          # Recompute the checksum against the renamed asset so what users
+          # verify matches what they download.
+          cd bin_out
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          else
+            certutil -hashfile "${{ matrix.asset_name }}" SHA256 | sed -n '2p' \
+              | tr -d ' \r' | awk '{print $1"  ${{ matrix.asset_name }}"}' \
+              > "${{ matrix.asset_name }}.sha256"
+          fi
+          cat "${{ matrix.asset_name }}.sha256"
 
-      - name: Upload Binary Artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: bin_out/${{ matrix.asset_name }}
-
-  release:
-    name: Publish Release Assets
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release_assets
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release_assets/vmsg-windows/vmsg-windows-amd64.exe
-            release_assets/vmsg-linux/vmsg-linux-amd64
-          generate_release_notes: true
+          path: bin_out/*
+          if-no-files-found: error
+          retention-days: 14

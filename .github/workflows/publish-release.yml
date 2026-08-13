@@ -1,0 +1,144 @@
+name: Publish Release
+
+# Publishes artifacts to a GitHub Release. Split from build-binaries.yml on
+# purpose: this is the only workflow with write access, it runs only for version
+# tags, and it re-runs the build so that what gets published is exactly what was
+# verified rather than an artifact picked up from an earlier, unrelated run.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (e.g. v1.2.0)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true   # never publish a partial set of platforms
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: vmsg-windows
+            asset_name: vmsg-windows-amd64.exe
+            executable: dist/vmsg.exe
+          - os: ubuntu-latest
+            artifact_name: vmsg-linux
+            asset_name: vmsg-linux-amd64
+            executable: dist/vmsg
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install pinned release dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-release.txt
+
+      - name: Confirm tag matches vmsg_core/version.py
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="v$(python -c 'from vmsg_core.version import __version__; print(__version__)')"
+          echo "tag=$TAG  version.py=$VERSION"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag $TAG does not match $VERSION in vmsg_core/version.py."
+            echo "A release whose binary reports a different version than its tag is"
+            echo "a support problem later. Fix version.py or retag."
+            exit 1
+          fi
+
+      - name: Build and verify binary
+        run: python build_binary.py
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          mkdir -p bin_out
+          cp "${{ matrix.executable }}" "bin_out/${{ matrix.asset_name }}"
+          cp dist/build-info.json "bin_out/${{ matrix.asset_name }}.build-info.json"
+          cd bin_out
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          else
+            certutil -hashfile "${{ matrix.asset_name }}" SHA256 | sed -n '2p' \
+              | tr -d ' \r' | awk '{print $1"  ${{ matrix.asset_name }}"}' \
+              > "${{ matrix.asset_name }}.sha256"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: bin_out/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # The only place in the project with write access.
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+
+      - name: Collect assets
+        shell: bash
+        run: |
+          mkdir -p upload
+          find release_assets -type f -exec cp {} upload/ \;
+          echo "Publishing:"
+          ls -la upload/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: upload/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Verifying your download
+
+            Each binary ships with a `.sha256` checksum and a
+            `.build-info.json` recording the Python version, platform and exact
+            dependency versions it was built from.
+
+            ```bash
+            sha256sum -c vmsg-linux-amd64.sha256
+            ```
+            ```powershell
+            Get-FileHash vmsg-windows-amd64.exe -Algorithm SHA256
+            ```
+
+            These binaries are **not code-signed**. Windows SmartScreen and
+            macOS Gatekeeper will warn on first run. Verify the checksum above,
+            or build from source with `python build_binary.py`.
+
+            Every published artifact passed the offline protocol fidelity suite
+            and the frozen-build verification before upload.

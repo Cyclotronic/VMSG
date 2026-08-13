@@ -6,7 +6,10 @@ __pycache__/
 # PyInstaller / Build outputs
 build/
 dist/
+# vmsg.spec is tracked deliberately - it defines how official artifacts are
+# packaged and should be reviewable. Only generated specs are ignored.
 *.spec
+!vmsg.spec
 
 # Pytest / Coverage / Tooling
 .pytest_cache/
