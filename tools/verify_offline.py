@@ -18,13 +18,15 @@ Exit code 0 when everything matches, 1 otherwise.
 import asyncio
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
 import threading
 import time
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
 
 from vmsg_core.config_manager import ConfigManager           # noqa: E402
 from vmsg_core.prologix_server import PrologixSocketServer   # noqa: E402
@@ -332,6 +334,43 @@ def check_limits():
 
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# 5. Dashboard / API contract consistency
+# --------------------------------------------------------------------------
+
+def check_dashboard_api_contract():
+    """Catch UI calls that do not satisfy an endpoint's required parameters.
+
+    Shipped bug this exists to prevent: the dashboard called
+    DELETE /api/mappings without ?confirm=true, which the endpoint rejects with
+    400. The frontend only logged the failure and carried on, so "force
+    overwrite" silently degraded into a partial overwrite - slots without a
+    replacement kept their old device.
+
+    A backend contract test would not have caught it: the endpoint was correct
+    and the caller was wrong. This is a narrow static check of the pairing.
+    """
+    print("\n5. Dashboard calls satisfy API requirements")
+    index = os.path.join(ROOT, "static", "index.html")
+    if not os.path.isfile(index):
+        fail("dashboard", "static/index.html not found")
+        return
+    html = open(index, encoding="utf-8", errors="replace").read()
+
+    # (description, regex matching a call that is WRONG, remedy)
+    rules = [
+        ("clear-all mappings sends ?confirm=true",
+         re.compile(r"fetch\(\s*['\"]/api/mappings(?!\?confirm=true)['\"]\s*,"
+                    r"\s*\{[^}]*method:\s*['\"]DELETE['\"]", re.S),
+         "DELETE /api/mappings requires ?confirm=true"),
+    ]
+    for label, bad_pattern, remedy in rules:
+        if bad_pattern.search(html):
+            fail(label, remedy)
+        else:
+            ok(label)
+
+
 def main():
     print("VMSG offline protocol fidelity")
     print("=" * 60)
@@ -343,6 +382,7 @@ def main():
         check_routing()
         check_concurrency()
         check_limits()
+        check_dashboard_api_contract()
     except Exception as e:
         fail("harness", f"{type(e).__name__}: {e}")
     finally:

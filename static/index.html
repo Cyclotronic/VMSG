@@ -2045,14 +2045,34 @@
             const assignedSlots = [];
 
             if (forceOverwrite) {
+                // DELETE /api/mappings refuses without ?confirm=true. Omitting it
+                // returned 400, and because the failure was only logged, the
+                // assignment carried on against the stale mapping list - so slots
+                // with no replacement kept their old device instead of being
+                // cleared. A failed clear must abort, not silently degrade into a
+                // partial overwrite.
+                let cleared = false;
+                let reason = '';
                 try {
-                    const clearRes = await fetch('/api/mappings', { method: 'DELETE' });
-                    if (clearRes.ok) {
-                        appState.mappings = {};
+                    const clearRes = await fetch('/api/mappings?confirm=true', { method: 'DELETE' });
+                    cleared = clearRes.ok;
+                    if (!cleared) {
+                        const body = await clearRes.json().catch(() => ({}));
+                        reason = body.detail || `HTTP ${clearRes.status}`;
                     }
                 } catch (err) {
-                    console.error("Failed to clear prior configurations:", err);
+                    reason = err.message || String(err);
                 }
+
+                if (!cleared) {
+                    appendConsoleMessage('ERROR',
+                        `Force overwrite aborted: could not clear existing mappings (${reason}). No changes made.`, true);
+                    alert(`Could not clear the existing mappings (${reason}).\n\n` +
+                          `Nothing was changed. Assigning now would leave stale devices ` +
+                          `in slots that have no replacement.`);
+                    return;
+                }
+                appState.mappings = {};
             }
 
             const mappings = appState.mappings;
