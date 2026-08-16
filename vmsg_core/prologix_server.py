@@ -8,7 +8,27 @@ from .logger import logger
 from .netutil import (DEFAULT_MAX_CLIENT_HANDLERS, MAX_PENDING_TEXT_CHARS,
                       ClientLimiter, describe_bind_error, start_exclusive_server)
 
-from pyvisa.constants import RENLineOperation
+from pyvisa.constants import RENLineOperation, StatusCode
+from pyvisa.errors import VisaIOError
+
+
+def is_read_timeout(exc: BaseException) -> bool:
+    """True when *exc* is a VISA read timeout rather than a genuine fault.
+
+    A read that finds nothing to say is normal Prologix behaviour, not an
+    error. `++read_tmo_ms` exists precisely to bound it, and with `++auto 1`
+    every non-query command produces one: the controller addresses the
+    instrument to talk, the instrument has nothing queued, the read times out.
+
+    Real hardware reports this to the client by returning nothing at all. It
+    has no error channel for I/O - the only string it ever emits is
+    `Unrecognized command`, for malformed `++` commands. So this must stay
+    invisible on the wire, and is worth logging only as an observation.
+    """
+    if isinstance(exc, VisaIOError):
+        return exc.error_code == StatusCode.error_timeout
+    return False
+
 
 _SESSION_ONLY = {
     "last_query_addr", "savecfg", "llo", "loc", "ifc",
@@ -671,6 +691,21 @@ class PrologixSocketServer:
             return None
         except Exception as e:
             await self.release_lease(visa_addr, client_addr)
+
+            if is_read_timeout(e):
+                # Expected, not a fault - see is_read_timeout(). Reported at INFO
+                # without a traceback, and deliberately WITHOUT a device clear:
+                # real hardware never issues a Selected Device Clear because a
+                # read timed out (++clr is an explicit client command), so doing
+                # it here would be an unrequested bus action that can disturb the
+                # instrument.
+                logger.info(
+                    "INSTR_WRITE",
+                    f"[{client_addr[0]}:{client_addr[1]}] No response from {visa_addr} "
+                    f"within {read_tmo_ms} ms after {repr(command)} - expected for a "
+                    f"command that returns no data.")
+                return self._empty_response(client_addr) if auto_mode == 1 else None
+
             logger.error("INSTR_WRITE", f"[{client_addr[0]}:{client_addr[1]}] Transaction failed to {visa_addr}: {e}", exc_info=True)
             if not visa_addr.upper().startswith("MOCK::"):
                 def _cleanup():
@@ -746,6 +781,16 @@ class PrologixSocketServer:
             logger.info("TRAFFIC_OUT", f"[{client_addr[0]}:{client_addr[1]}] <- {repr(out)}")
             return out
         except Exception as e:
+            if is_read_timeout(e):
+                # An explicit ++read that finds nothing is the case
+                # ++read_tmo_ms is defined for. Same treatment as the auto-read
+                # path: observation, not an error, and no device clear.
+                logger.info(
+                    "INSTR_READ",
+                    f"[{client_addr[0]}:{client_addr[1]}] Nothing to read from {visa_addr} "
+                    f"within {read_tmo_ms} ms - instrument had no data queued.")
+                return self._empty_response(client_addr)
+
             logger.error("INSTR_READ", f"[{client_addr[0]}:{client_addr[1]}] Read failed from {visa_addr}: {e}")
             if not visa_addr.upper().startswith("MOCK::"):
                 def _cleanup():
@@ -756,7 +801,7 @@ class PrologixSocketServer:
                     except Exception:
                         self.visa_manager.purge_resource(visa_addr)
                 await asyncio.to_thread(_cleanup)
-                
+
             return self._empty_response(client_addr)
         finally:
             await self.release_lease(visa_addr, client_addr)

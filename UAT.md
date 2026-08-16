@@ -90,6 +90,10 @@ shared-bus serialisation actually get tested.
 - [ ] Unmapped slot returns an empty response rather than another instrument's
       data
 - [ ] Cooldowns, when they trigger, name the instrument and the reason
+- [ ] **With `++auto 1`, a command that returns no data (`LOAD 0`, `*CLS`,
+      `MODE BATL`) logs at INFO, not ERROR, and issues no device clear.** The
+      client still receives the same reply as before. This is expected Prologix
+      behaviour, not a fault.
 
 ## 6. Packaged artifact
 
@@ -155,6 +159,46 @@ in the release notes, not carried in someone's memory.
 
 ## Known gaps accepted for this release
 ```
+
+---
+
+## Open fidelity questions
+
+Two deviations from captured Prologix hardware behaviour. Both are **visible on
+the wire**, so neither was changed without bench testing. Reference:
+BenchForge `profiles/PROLOGIX_HARDWARE_PROFILE.md` (firmware `01.06.06.00`).
+
+### 1. VMSG returns CRLF on a read timeout; hardware returns nothing
+
+The profile records a silent timeout — *"Serial-polling an address with no
+instrument returns **nothing at all**"* — and BenchForge's emulator agrees
+(`"Read timeout: nothing goes on the wire, which is correct"`).
+
+VMSG's `_empty_response()` returns `"\r\n"`. A client counting lines therefore
+sees a phantom empty response where real hardware sends zero bytes.
+
+- [ ] Determine whether TestController depends on the current CRLF
+- [ ] Check the other `_empty_response()` callers (unmapped address, lease
+      contention) — the faithful answer may differ per path
+- [ ] If changed, re-run a full TestController session before accepting
+
+### 2. Default settings differ from hardware defaults
+
+| setting | VMSG | hardware |
+| :--- | ---: | ---: |
+| `addr` | 1 | **4** |
+| `auto` | 1 | **0** |
+| `eos` | 0 | **3** |
+| `read_tmo_ms` | 3000 | **200** |
+| `eot_char` | 4 | **0** |
+
+`auto` matters most: hardware defaults to manual-read mode, VMSG to
+read-after-write. With `++auto 1` every command that returns no data costs a
+full `read_tmo_ms` — faithful behaviour, but 3000 ms instead of the hardware's
+200 ms makes it 15× more painful.
+
+- [ ] Decide which defaults should match hardware
+- [ ] Confirm no existing client depends on the current values
 
 ---
 
