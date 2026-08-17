@@ -202,6 +202,19 @@ full `read_tmo_ms` — faithful behaviour, but 3000 ms instead of the hardware's
 
 ---
 
+## Findings from testing in progress
+
+[`docs/uat-runs/2026-08-16-findings.md`](docs/uat-runs/2026-08-16-findings.md) —
+open items from the current bench session:
+
+- **"Lease contention timeout" reports the wrong cause.** One handler catches
+  both a lease timeout and a connect-budget timeout. Log-only, fix is simple.
+- **Connect budget (5 s) is shorter than a GPIB open on an absent address.**
+  Causes a 5 s stall and a spurious unresponsive marking; self-corrects. Needs
+  a measurement before changing.
+
+---
+
 ## Currently outstanding
 
 Carried forward until a bench run clears them:
