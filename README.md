@@ -176,3 +176,6 @@ Off by default — everything runs on the single control port `1234`. When enabl
 
 For the full technical breakdown — decompiled root causes, diagnostic logs, and the defects worth reporting upstream — see **[`TESTCONTROLLER_NOTES.md`](TESTCONTROLLER_NOTES.md)**.
 
+### What VMSG costs
+Measured against direct NI-VISA on the same instruments: **~1 ms per query, and nothing measurable for address switching** — including the interleaved round-robin case that TestController produces when several devices log together. Per-query cost is set by the instrument, not the gateway; it varied 10× between instruments on the same bus. See **[`PERFORMANCE.md`](PERFORMANCE.md)**, reproducible with `tools/vmsg_overhead.py`.
+
