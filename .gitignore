@@ -39,3 +39,7 @@ mappings.json.tmp
 tools/tc-patch-tools/
 TestController-patched.jar
 TestController-scripted.jar
+
+# Local assistant/tool state. Machine-specific: records absolute Windows paths
+# and a per-machine command allowlist. This repo is public; never commit it.
+.claude/settings.local.json
