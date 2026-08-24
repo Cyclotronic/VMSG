@@ -71,7 +71,9 @@ def main():
                 continue
             same = (open(installed, "rb").read()
                     == open(os.path.join(SOURCE_DIR, name), "rb").read())
-            print(f"  {name}: installed" + ("" if same else " (DIFFERS from tools/hooks)"))
+            runnable = "" if os.access(installed, os.X_OK) else " (NOT EXECUTABLE - git will skip it)"
+            print(f"  {name}: installed"
+                  + ("" if same else " (DIFFERS from tools/hooks)") + runnable)
         return 0
 
     os.makedirs(target_dir, exist_ok=True)
@@ -109,6 +111,26 @@ def main():
         print(f"  {name}: installed")
 
     print(f"\nInstalled into {target_dir}")
+
+    # Copying the file and chmod'ing it is not evidence that git will run it.
+    # Some filesystems accept the chmod, report the bit back through stat(), and
+    # still fail access(X_OK) - notably an SMB share mounted noowners, which is
+    # how this repository is reached from the lab workspace. Git then skips the
+    # hook with a one-line hint that is easy to read past, and the gate is gone
+    # without anything failing. Check the thing git actually checks.
+    inert = [n for n in names
+             if not os.access(os.path.join(target_dir, n), os.X_OK)]
+    if inert:
+        print("\n!! WARNING: " + ", ".join(inert) + " cannot be executed here.")
+        print("   git will SKIP these hooks. Nothing gates your pushes.")
+        print("   This is normal on a network share (SMB/CIFS mounted noowners);")
+        print("   the exec bit is displayed but access(X_OK) fails.")
+        print("   Run the checks by hand before pushing:")
+        print("     python -m pyflakes vmsg.py vmsg_core tests tools build_binary.py")
+        print("     python tools/verify_offline.py")
+        print("   CI still runs them, but after the push rather than before.")
+        return 1
+
     print("The pre-push hook runs pyflakes and the offline fidelity suite "
           "(~10s).\nBypass with: git push --no-verify")
     return 0

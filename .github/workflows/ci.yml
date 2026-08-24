@@ -45,7 +45,7 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Static analysis
-        run: python -m pyflakes vmsg.py vmsg_core tests tools
+        run: python -m pyflakes vmsg.py vmsg_core tests tools build_binary.py
 
       # Deterministic: starts servers in-process, no background process and no
       # sleep to race against. Runs without VISA hardware.
